@@ -1,0 +1,46 @@
+name = "rpl-hospital-waba"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# Environment Variables
+[vars]
+HOSPITAL_NAME = "RPL Hospital"
+HOSPITAL_PHONE = "08069640826"
+HOSPITAL_EMAIL = "info@rplhospital.com"
+HOSPITAL_ADDRESS = "Baidaula Chauraha, Bansi Road, Dumariyaganj, Siddharthnagar, UP, 272189"
+HOSPITAL_NOTIFICATION_NUMBER = "919455060456"
+WHATSAPP_PHONE_NUMBER_ID = "973417615848807"
+WHATSAPP_VERIFY_TOKEN = "rplhospital"
+WHATSAPP_BUSINESS_ACCOUNT_ID = "866871359575360"
+WHATSAPP_ACCESS_TOKEN = "YOUR_ACCESS_TOKEN_HERE"
+GROQ_API_KEY = "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"
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "rpl_hospital_db"
+database_id = "4ad18593-6009-4eec-9ae8-bba63917b0db"
+
+# KV Namespace for session management
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "6001cdc0222f4f4aabcc591a7d24b0e6"
+
+[build]
+command = ""
+
+# Scheduled triggers for reminders
+[triggers]
+crons = [
+    "0 8 * * *",   # Appointment reminders at 8 AM IST
+    "0 21 * * *",  # Daily summary at 9 PM IST
+    "0 * * * *"    # Medicine reminders every hour
+]
+
+# Production environment
+[env.production]
+vars = { ENVIRONMENT = "production" }
+
+# Development environment  
+[env.dev]
+vars = { ENVIRONMENT = "development" }
