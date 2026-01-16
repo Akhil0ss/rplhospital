@@ -9,9 +9,9 @@ HOSPITAL_PHONE = "08069640826"
 HOSPITAL_EMAIL = "info@rplhospital.com"
 HOSPITAL_ADDRESS = "Baidaula Chauraha, Bansi Road, Dumariyaganj, Siddharthnagar, UP, 272189"
 HOSPITAL_NOTIFICATION_NUMBER = "919455060456"
-WHATSAPP_PHONE_NUMBER_ID = "973417615848807"
+WHATSAPP_PHONE_NUMBER_ID = "1107630315760579"
 WHATSAPP_VERIFY_TOKEN = "rplhospital"
-WHATSAPP_BUSINESS_ACCOUNT_ID = "866871359575360"
+WHATSAPP_BUSINESS_ACCOUNT_ID = "894712609907706"
 WHATSAPP_ACCESS_TOKEN = "YOUR_ACCESS_TOKEN_HERE"
 GROQ_API_KEY = "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"
 
@@ -28,6 +28,12 @@ id = "6001cdc0222f4f4aabcc591a7d24b0e6"
 
 [build]
 command = ""
+
+# Observability & Logging
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true
 
 # Scheduled triggers for reminders
 [triggers]
