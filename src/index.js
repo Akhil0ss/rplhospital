@@ -64,7 +64,6 @@ async function handleIncoming(request, env, ctx) {
   }
 }
 
-
 // ---------------------------------------------
 // Language Detection (Simple Heuristic)
 // ---------------------------------------------
@@ -271,9 +270,16 @@ async function getPatientHistory(db, phone, name) {
     return `जी ${name}, अभी तक आपकी कोई पुरानी OPD एंट्री नहीं मिली है।`;
   }
 
-  let text = `जी ${name}, आपकी पिछली OPD बुकिंग:\n\n`;
+  let text = `जी ${name}, आपकी पिछली OPD बुकिंग:
+
+`;
   rows.results.forEach(r => {
-    text += `👨‍⚕️ ${r.doctor_name}\n📅 ${r.appointment_date}\n⏰ ${r.appointment_time}\n🎫 Token: ${r.token_number}\n\n`;
+    text += `👨‍⚕️ ${r.doctor_name}
+📅 ${r.appointment_date}
+⏰ ${r.appointment_time}
+🎫 Token: ${r.token_number}
+
+`;
   });
 
   return text;
@@ -301,16 +307,9 @@ function suggestDoctorBySymptoms(text) {
 // Detect Lab Test Intent
 function detectLabTest(text) {
   return LAB_TESTS.find(t => text.toLowerCase().includes(t.toLowerCase()));
- }
-
-// Greeting handling
-if (["hi", "hello", "namaste", "hii", "hey"].includes(t)) {
-  return lang === "hi"
-    ? `नमस्ते ${name} जी। आप किस समस्या के लिए बात कर रहे हैं? डॉक्टर दिखाना है, जाँच करानी है, या कोई और जानकारी चाहिए?`
-    : `Hello ${name}. How can I help you today? Are you looking for a doctor, a lab test, or some information?`;
 }
 
- // =============================================
+// =============================================
 // PART 3 / 3 : FULL CONVERSATION FLOW & FINAL AI BRAIN
 // =============================================
 
@@ -320,7 +319,10 @@ async function aiRouter(env, userText, phone, name, session) {
 
   // 1. Emergency
   if (isEmergency(userText)) {
-    await notifyAdmin(env, `🚨 EMERGENCY ALERT\nName: ${name}\nPhone: ${phone}\nMsg: ${userText}`);
+    await notifyAdmin(env, `🚨 EMERGENCY ALERT
+Name: ${name}
+Phone: ${phone}
+Msg: ${userText}`);
     return lang === "hi"
       ? `यह स्थिति गंभीर लग रही है। कृपया तुरंत ${env.HOSPITAL_PHONE} पर कॉल करें या सीधे अस्पताल आइए।`
       : `This looks serious. Please call ${env.HOSPITAL_PHONE} immediately or come to the hospital.`;
@@ -354,7 +356,12 @@ async function aiRouter(env, userText, phone, name, session) {
     await saveLabTest(env.DB, phone, name, session.lab.test, session.lab.date, session.lab.time);
     await savePatient(env.DB, phone, name);
 
-    await notifyAdmin(env, `🧪 New Lab Booking\nPatient: ${name}\nPhone: ${phone}\nTest: ${session.lab.test}\nDate: ${session.lab.date}\nTime: ${session.lab.time}`);
+    await notifyAdmin(env, `🧪 New Lab Booking
+Patient: ${name}
+Phone: ${phone}
+Test: ${session.lab.test}
+Date: ${session.lab.date}
+Time: ${session.lab.time}`);
 
     session.step = null;
     session.lab = null;
@@ -364,49 +371,43 @@ async function aiRouter(env, userText, phone, name, session) {
       : `Your lab test has been booked. Please come at the scheduled time.`;
   }
 
+  // Simple intent check: is user actually asking for doctor?
+  const wantsDoctor = /doctor|appointment|checkup|dikhana|dikhao|pain|dard|problem|बीमारी|दर्द|चेकअप/i.test(userText);
 
-// Simple intent check: is user actually asking for doctor?
-const wantsDoctor = /doctor|appointment|checkup|dikhana|dikhao|pain|dard|problem|बीमारी|दर्द|चेकअप/i.test(userText);
-
-// Greeting handling
-if (["hi","hello","namaste","hey","hii"].includes(t)) {
-  return lang === "hi"
-    ? `नमस्ते ${name} जी। आप किस समस्या के लिए बात कर रहे हैं? डॉक्टर दिखाना है या कोई जाँच करानी है?`
-    : `Hello ${name}. How may I help you today? Are you looking to consult a doctor or get a test done?`;
-}
-
-// Only enter OPD flow if user actually wants doctor
-if (wantsDoctor) {
-  const doctor = suggestDoctorBySymptoms(userText);
-
-  if (!session.step) {
-    session.step = "opd_date";
-    session.doctor = doctor;
+  // Greeting handling
+  if (["hi","hello","namaste","hey","hii"].includes(t)) {
     return lang === "hi"
-      ? `आपकी समस्या के लिए ${doctor.name} (${doctor.dept}) उपयुक्त रहेंगे। आप किस तारीख को दिखाना चाहेंगे?`
-      : `For your concern, ${doctor.name} (${doctor.dept}) would be suitable. Which date would you like to visit?`;
-  }
-}
-
-  // 4. OPD / Doctor intent
-  const doctor = suggestDoctorBySymptoms(userText);
-
-  if (!session.step) {
-    session.step = "opd_date";
-    session.doctor = doctor;
-    return lang === "hi"
-      ? `आपकी समस्या के लिए ${doctor.name} (${doctor.dept}) उपयुक्त रहेंगे। आप किस तारीख को दिखाना चाहेंगे?`
-      : `For your concern, ${doctor.name} (${doctor.dept}) would be suitable. Which date would you like to visit?`;
+      ? `नमस्ते ${name} जी। आप किस समस्या के लिए बात कर रहे हैं? डॉक्टर दिखाना है या कोई जाँच करानी है?`
+      : `Hello ${name}. How may I help you today? Are you looking to consult a doctor or get a test done?`;
   }
 
+  // Only enter OPD flow if user actually wants doctor
+  if (wantsDoctor) {
+    const doctor = suggestDoctorBySymptoms(userText);
+
+    if (!session.step) {
+      session.step = "opd_date";
+      session.doctor = doctor;
+      return lang === "hi"
+        ? `आपकी समस्या के लिए ${doctor.name} (${doctor.dept}) उपयुक्त रहेंगे। आप किस तारीख को दिखाना चाहेंगे?`
+        : `For your concern, ${doctor.name} (${doctor.dept}) would be suitable. Which date would you like to visit?`;
+    }
+  }
+
+  // 4. OPD / Doctor intent (continued flow)
   if (session.step === "opd_date") {
     session.date = userText;
     session.step = "opd_slot";
 
-    const slots = generateSlots().join("\n");
+    const slots = generateSlots().join("
+");
     return lang === "hi"
-      ? `ठीक है, ${userText} को OPD 2 से 6 बजे तक है। उपलब्ध समय:\n${slots}\nआप कौन सा समय चाहेंगे?`
-      : `OPD is from 2 PM to 6 PM on ${userText}. Available slots:\n${slots}\nWhich time suits you?`;
+      ? `ठीक है, ${userText} को OPD 2 से 6 बजे तक है। उपलब्ध समय:
+${slots}
+आप कौन सा समय चाहेंगे?`
+      : `OPD is from 2 PM to 6 PM on ${userText}. Available slots:
+${slots}
+Which time suits you?`;
   }
 
   if (session.step === "opd_slot") {
@@ -430,14 +431,30 @@ if (wantsDoctor) {
 
     await savePatient(env.DB, phone, name);
 
-    await notifyAdmin(env, `📌 New OPD Booking\nPatient: ${name}\nPhone: ${phone}\nDoctor: ${session.doctor.name}\nDate: ${session.date}\nTime: ${session.slot}\nToken: ${token}`);
+    await notifyAdmin(env, `📌 New OPD Booking
+Patient: ${name}
+Phone: ${phone}
+Doctor: ${session.doctor.name}
+Date: ${session.date}
+Time: ${session.slot}
+Token: ${token}`);
 
     session.step = null;
     session.doctor = null;
 
     return lang === "hi"
-      ? `आपका अपॉइंटमेंट पक्का हो गया है।\nडॉक्टर: ${session.doctor?.name || ""}\nतारीख: ${session.date}\nसमय: ${session.slot}\nटोकन: ${token}\nकृपया 10 मिनट पहले पहुँचे।`
-      : `Your appointment is confirmed.\nDoctor: ${session.doctor?.name || ""}\nDate: ${session.date}\nTime: ${session.slot}\nToken: ${token}\nPlease arrive 10 minutes early.`;
+      ? `आपका अपॉइंटमेंट पक्का हो गया है।
+डॉक्टर: ${session.doctor?.name || ""}
+तारीख: ${session.date}
+समय: ${session.slot}
+टोकन: ${token}
+कृपया 10 मिनट पहले पहुँचे।`
+      : `Your appointment is confirmed.
+Doctor: ${session.doctor?.name || ""}
+Date: ${session.date}
+Time: ${session.slot}
+Token: ${token}
+Please arrive 10 minutes early.`;
   }
 
   // 5. Fallback – polite, natural
