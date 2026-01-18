@@ -302,7 +302,7 @@ async function mainRouter(env, msg, name, session) {
     session.state = "choose_doctor";
     return `👨‍⚕️ Doctor चुनें / Choose Doctor:
 
-1. Dr. Akhilesh Kumar (Diabetes)
+1. Dr. Akhilesh Kumar (Diabetes, Physician)
 2. Dr. Ankit Shukla (Neurologist)
 3. Dr. A.K. Singh (ENT)
 4. Dr. Anand Mishra (Dental)
