@@ -1,4 +1,4 @@
-// src/index.js - BUILD FIXED VERSION
+// src/index.js - QUOTES FIXED
 import { WhatsAppAPI } from './services/whatsapp.js';
 import { MessageProcessor } from './services/message-processor.js';
 import { SessionManager } from './services/session.js';
@@ -55,8 +55,7 @@ async function handleWebhook(request, env) {
     } catch (initError) {
       console.error('❌ Service init failed:', initError);
       for (const message of messages) {
-        await sendEmergencyReply(env, message.from, "✅ RPL Hospital Bot!
-Type MENU");
+        await sendEmergencyReply(env, message.from, "✅ RPL Hospital Bot! Type MENU");
       }
       return;
     }
@@ -75,7 +74,7 @@ Type MENU");
 
       } catch (msgError) {
         console.error(`❌ Msg error ${message.from}:`, msgError);
-        await sendEmergencyReply(env, message.from, "❌ Try 'menu'");
+        await sendEmergencyReply(env, message.from, "❌ Try menu");
       }
     }
 
