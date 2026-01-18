@@ -364,6 +364,30 @@ async function aiRouter(env, userText, phone, name, session) {
       : `Your lab test has been booked. Please come at the scheduled time.`;
   }
 
+
+// Simple intent check: is user actually asking for doctor?
+const wantsDoctor = /doctor|appointment|checkup|dikhana|dikhao|pain|dard|problem|बीमारी|दर्द|चेकअप/i.test(userText);
+
+// Greeting handling
+if (["hi","hello","namaste","hey","hii"].includes(t)) {
+  return lang === "hi"
+    ? `नमस्ते ${name} जी। आप किस समस्या के लिए बात कर रहे हैं? डॉक्टर दिखाना है या कोई जाँच करानी है?`
+    : `Hello ${name}. How may I help you today? Are you looking to consult a doctor or get a test done?`;
+}
+
+// Only enter OPD flow if user actually wants doctor
+if (wantsDoctor) {
+  const doctor = suggestDoctorBySymptoms(userText);
+
+  if (!session.step) {
+    session.step = "opd_date";
+    session.doctor = doctor;
+    return lang === "hi"
+      ? `आपकी समस्या के लिए ${doctor.name} (${doctor.dept}) उपयुक्त रहेंगे। आप किस तारीख को दिखाना चाहेंगे?`
+      : `For your concern, ${doctor.name} (${doctor.dept}) would be suitable. Which date would you like to visit?`;
+  }
+}
+
   // 4. OPD / Doctor intent
   const doctor = suggestDoctorBySymptoms(userText);
 
