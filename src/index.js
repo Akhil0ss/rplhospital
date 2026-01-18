@@ -303,6 +303,13 @@ function detectLabTest(text) {
   return LAB_TESTS.find(t => text.toLowerCase().includes(t.toLowerCase()));
  }
 
+// Greeting handling
+if (["hi", "hello", "namaste", "hii", "hey"].includes(t)) {
+  return lang === "hi"
+    ? `नमस्ते ${name} जी। आप किस समस्या के लिए बात कर रहे हैं? डॉक्टर दिखाना है, जाँच करानी है, या कोई और जानकारी चाहिए?`
+    : `Hello ${name}. How can I help you today? Are you looking for a doctor, a lab test, or some information?`;
+}
+
  // =============================================
 // PART 3 / 3 : FULL CONVERSATION FLOW & FINAL AI BRAIN
 // =============================================
