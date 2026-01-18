@@ -1,6 +1,6 @@
 // =============================================
-// RPL HOSPITAL – ERROR FIXED VERSION
-// PROPER REQUEST HANDLING WITH STREAM MANAGEMENT
+// RPL HOSPITAL – COMPLETE AI RECEPTIONIST
+// ALL FEATURES + ERROR FIXED
 // =============================================
 
 export default {
@@ -13,6 +13,7 @@ export default {
         return new Response(JSON.stringify({
           status: "active",
           service: "rpl-ai-receptionist",
+          features: ["emergency", "appointment", "lab", "history", "admin_notify"],
           timestamp: new Date().toISOString()
         }), {
           status: 200,
@@ -27,12 +28,12 @@ export default {
       
       // ✅ INCOMING MESSAGE - FIXED VERSION
       if (request.method === "POST" && url.pathname === "/webhook") {
-        // IMPORTANT: Read request body BEFORE returning response
+        // IMPORTANT: Clone request before reading
         const requestClone = request.clone();
         const body = await requestClone.json();
         
-        // Process asynchronously but safely
-        ctx.waitUntil(processWebhookMessage(body, env));
+        // Process in background
+        ctx.waitUntil(processCompleteMessage(body, env, ctx));
         
         return new Response("OK", { status: 200 });
       }
@@ -47,10 +48,10 @@ export default {
 };
 
 // =============================================
-// FIXED WEBHOOK PROCESSOR
+// 1. COMPLETE MESSAGE PROCESSOR
 // =============================================
 
-async function processWebhookMessage(body, env) {
+async function processCompleteMessage(body, env, ctx) {
   try {
     const entry = body.entry?.[0];
     if (!entry) return;
@@ -62,10 +63,9 @@ async function processWebhookMessage(body, env) {
     const messages = value.messages || [];
     const contacts = value.contacts || [];
     
-    // Process each message
     for (const msg of messages) {
       try {
-        await handleMessage(msg, contacts, env);
+        await handleCompleteMessage(msg, contacts, env, ctx);
       } catch (msgError) {
         console.error(`Message ${msg.id} failed:`, msgError);
       }
@@ -76,11 +76,10 @@ async function processWebhookMessage(body, env) {
 }
 
 // =============================================
-// MESSAGE HANDLER (SIMPLIFIED)
+// 2. COMPLETE MESSAGE HANDLER (ALL FEATURES)
 // =============================================
 
-async function handleMessage(msg, contacts, env) {
-  // Validate message type
+async function handleCompleteMessage(msg, contacts, env, ctx) {
   if (msg.type !== "text") return;
   
   const userPhone = msg.from;
@@ -89,181 +88,197 @@ async function handleMessage(msg, contacts, env) {
   const userMessage = msg.text?.body?.trim() || "";
   const messageId = msg.id;
   
-  console.log(`📱 ${userPhone}: ${userMessage.substring(0, 50)}...`);
+  console.log(`📞 ${userPhone} (${userName}): ${userMessage}`);
   
-  // Get or create session
-  const session = await getSession(env.SESSIONS, userPhone);
+  // ✅ LOG INCOMING
+  await safeLog(env.DB, userPhone, "incoming", userMessage, messageId);
   
-  // Detect language preference
-  const lang = detectLanguage(userMessage, session);
+  // ✅ GET SESSION WITH CONTEXT
+  const session = await getCompleteSession(env.SESSIONS, userPhone, userName);
   
-  // Update session language preference
-  if (userMessage.toLowerCase().includes("hindi bolo") || 
-      userMessage.includes("हिंदी बोलो")) {
-    session.language = 'hi';
-    session.languageSet = true;
+  // ✅ DETECT LANGUAGE WITH PREFERENCE
+  const langInfo = detectLanguageWithContext(userMessage, session);
+  
+  // ✅ UPDATE SESSION LANGUAGE
+  if (langInfo.isLanguageRequest) {
+    session.preferredLanguage = 'hi';
+    session.languageRequested = true;
   }
   
-  // Generate response
-  let response;
+  const replyLanguage = session.preferredLanguage || langInfo.language;
   
-  // Handle specific cases
-  if (userMessage.toLowerCase() === "hi" || userMessage.toLowerCase() === "hello") {
-    response = session.language === 'hi' 
-      ? "नमस्ते! आप RPL Hospital के AI रिसेप्शनिस्ट से बात कर रहे हैं। आप कैसे मदद चाहते हैं?"
-      : "Hello! You're speaking with RPL Hospital AI receptionist. How can I help you today?";
-  }
-  else if (userMessage.toLowerCase().includes("hindi bolo") || 
-           userMessage.includes("हिंदी बोलो")) {
-    session.language = 'hi';
-    response = "जी, अब मैं हिंदी में बात करूंगा। आप कैसे मदद चाहते हैं?";
-  }
-  else if (userMessage === "नमस्ते" || userMessage === "Namaste") {
-    response = "नमस्ते! कैसे मदद कर सकता हूं?";
-  }
-  else {
-    // Use AI for other messages
-    response = await getAIResponse(env, userMessage, session.language || lang);
+  // ✅ CHECK EMERGENCY (PRIORITY 1)
+  if (isEmergencySituation(userMessage)) {
+    await handleEmergencySituation(env, userPhone, userName, userMessage, replyLanguage);
+    return;
   }
   
-  // Save session
-  session.lastActive = Date.now();
-  await saveSession(env.SESSIONS, userPhone, session);
+  // ✅ GET PATIENT HISTORY FOR CONTEXT
+  const patientContext = await getCompletePatientContext(env.DB, userPhone, userName);
   
-  // Send response
-  await sendWhatsApp(env, userPhone, response);
-  
-  // Log
-  await logInteraction(env.DB, {
-    phone: userPhone,
-    incoming: userMessage,
-    outgoing: response,
-    messageId
-  });
-}
-
-// =============================================
-// SIMPLIFIED SESSION MANAGEMENT
-// =============================================
-
-async function getSession(kv, phone) {
-  try {
-    const data = await kv.get(`session_${phone}`, { type: "json" });
-    if (data && Date.now() - data.lastActive < 30 * 60 * 1000) {
-      return data;
-    }
-  } catch (error) {
-    console.error("Session read error:", error);
-  }
-  
-  // Default session
-  return {
-    phone: phone,
-    language: null,
-    lastActive: Date.now(),
-    createdAt: Date.now()
+  // ✅ PREPARE AI CONTEXT
+  const aiContext = {
+    userMessage,
+    userName,
+    userPhone,
+    patientContext,
+    language: replyLanguage,
+    sessionState: session,
+    hospitalInfo: {
+      name: env.HOSPITAL_NAME,
+      phone: env.HOSPITAL_PHONE,
+      address: env.HOSPITAL_ADDRESS,
+      email: env.HOSPITAL_EMAIL
+    },
+    doctors: [
+      { id: 1, name: "Dr. Akhilesh Kumar", dept: "Physician & Diabetes" },
+      { id: 2, name: "Dr. Ankit Shukla", dept: "Neurologist" },
+      { id: 3, name: "Dr. A.K. Singh", dept: "ENT" },
+      { id: 4, name: "Dr. Anand Mishra", dept: "Dental" }
+    ],
+    labTests: ["CBC", "Blood Sugar", "Thyroid", "LFT", "KFT", "Lipid Profile", "Urine Test"]
   };
-}
-
-async function saveSession(kv, phone, session) {
-  try {
-    await kv.put(
-      `session_${phone}`,
-      JSON.stringify(session),
-      { expirationTtl: 86400 } // 24 hours
-    );
-  } catch (error) {
-    console.error("Session save error:", error);
+  
+  // ✅ CALL COMPLETE AI
+  const aiResponse = await callCompleteAI(env, aiContext);
+  
+  // ✅ EXECUTE AI ACTIONS
+  if (aiResponse.actions && aiResponse.actions.length > 0) {
+    await executeAIActions(env, aiResponse.actions, userPhone, userName, replyLanguage);
+  }
+  
+  // ✅ SEND RESPONSE TO USER
+  await sendWhatsAppMessage(env, userPhone, aiResponse.reply, messageId);
+  
+  // ✅ UPDATE SESSION
+  session.lastMessage = userMessage;
+  session.lastResponse = aiResponse.reply.substring(0, 100);
+  session.lastActive = Date.now();
+  session.messageCount = (session.messageCount || 0) + 1;
+  
+  await saveCompleteSession(env.SESSIONS, userPhone, session);
+  
+  // ✅ LOG OUTGOING
+  await safeLog(env.DB, userPhone, "outgoing", aiResponse.reply, `resp_${Date.now()}`);
+  
+  // ✅ NOTIFY ADMIN IF NEEDED
+  if (aiResponse.notifyAdmin) {
+    await notifyAdmin(env, aiResponse.notifyAdmin);
   }
 }
 
 // =============================================
-// IMPROVED LANGUAGE DETECTION
+// 3. COMPLETE AI ENGINE (ALL FEATURES)
 // =============================================
 
-function detectLanguage(text, session) {
-  // If user has set preference, use it
-  if (session?.language === 'hi') return 'hi';
-  if (session?.language === 'en') return 'en';
-  
-  // Detect from text
-  const lowerText = text.toLowerCase();
-  
-  // Hindi patterns
-  const hindiPatterns = [
-    /[\u0900-\u097F]/, // Hindi characters
-    /\b(नमस्ते|हैलो|हां|नहीं|कैसे|क्या|में|हूं|है|हैं|बोलो|हिंदी|कृपया|धन्यवाद|जी)\b/,
-    /hindi\s+bolo/i,
-    /हिंदी\s+बोलो/i
-  ];
-  
-  // If any Hindi pattern matches
-  for (const pattern of hindiPatterns) {
-    if (pattern.test(text)) return 'hi';
-  }
-  
-  // English patterns
-  const englishPatterns = [
-    /\b(hi|hello|hey|good|morning|afternoon|evening|appointment|doctor|test)\b/i,
-    /^[a-zA-Z\s,.!?]+$/ // Only English characters
-  ];
-  
-  for (const pattern of englishPatterns) {
-    if (pattern.test(lowerText)) return 'en';
-  }
-  
-  // Default to Hindi for Indian numbers
-  return 'hi';
-}
+async function callCompleteAI(env, context) {
+  const systemPrompt = context.language === 'hi' ? `
+# भूमिका: RPL Hospital पूर्ण AI रिसेप्शनिस्ट
 
-// =============================================
-// AI RESPONSE GENERATOR
-// =============================================
+# अस्पताल जानकारी:
+- नाम: ${context.hospitalInfo.name}
+- फोन: ${context.hospitalInfo.phone}
+- पता: ${context.hospitalInfo.address}
+- ईमेल: ${context.hospitalInfo.email}
 
-async function getAIResponse(env, message, lang) {
-  const systemPrompt = lang === 'hi' ? `
-आप RPL Hospital के AI receptionist हैं।
-हमेशा विनम्र और helpful रहें।
-कीमतों का जिक्र न करें।
-आपात स्थिति में तुरंत मदद करें।
-
-अस्पताल जानकारी:
-- नाम: RPL Hospital
-- फोन: ${env.HOSPITAL_PHONE}
-- पता: ${env.HOSPITAL_ADDRESS}
-
-डॉक्टर:
-1. डॉ. अखिलेश कुमार - फिजिशियन और शुगर
+# डॉक्टर:
+1. डॉ. अखिलेश कुमार - फिजिशियन और शुगर विशेषज्ञ
 2. डॉ. अंकित शुक्ला - न्यूरोलॉजिस्ट
-3. डॉ. ए.के. सिंह - ENT
-4. डॉ. आनंद मिश्रा - डेंटल
+3. डॉ. ए.के. सिंह - ENT विशेषज्ञ  
+4. डॉ. आनंद मिश्रा - डेंटल विशेषज्ञ
 
-टेस्ट: CBC, Blood Sugar, Thyroid, LFT, KFT, Lipid, Urine
+# लैब टेस्ट:
+CBC, Blood Sugar, Thyroid, LFT, KFT, Lipid Profile, Urine Test
 
-मरीज का मैसेज: "${message}"
+# रोगी संदर्भ:
+${context.patientContext}
 
-उचित जवाब दें:` : `
-You are RPL Hospital's AI receptionist.
-Always be polite and helpful.
-Never mention prices.
-Help immediately in emergencies.
+# आपकी क्षमताएं:
+1. आपातकालीन पहचान और प्रबंधन
+2. डॉक्टर अपॉइंटमेंट बुकिंग
+3. लैब टेस्ट बुकिंग
+4. रोगी इतिहास जाँच
+5. प्राकृतिक वार्तालाप
+6. प्रशासनिक सूचनाएं
 
-Hospital Info:
-- Name: RPL Hospital
-- Phone: ${env.HOSPITAL_PHONE}
-- Address: ${env.HOSPITAL_ADDRESS}
+# प्रतिक्रिया प्रारूप (JSON):
+{
+  "reply": "रोगी को प्राकृतिक प्रतिक्रिया",
+  "actions": [
+    {
+      "type": "book_appointment",
+      "doctor_name": "डॉक्टर का नाम",
+      "date": "दिनांक",
+      "time": "समय",
+      "department": "विभाग"
+    }
+  ],
+  "notifyAdmin": "वैकल्पिक प्रशासन संदेश"
+}
 
-Doctors:
-1. Dr. Akhilesh Kumar - Physician & Diabetes
+# महत्वपूर्ण:
+- कीमतों का उल्लेख न करें
+- विनम्र और सहायक रहें
+- आपात स्थिति में तुरंत मार्गदर्शन करें
+- प्राकृतिक हिंदी में बात करें
+
+# वर्तमान संवाद:
+रोगी: ${context.userName} (${context.userPhone})
+संदेश: "${context.userMessage}"
+` : `
+# ROLE: RPL Hospital Complete AI Receptionist
+
+# HOSPITAL INFORMATION:
+- Name: ${context.hospitalInfo.name}
+- Phone: ${context.hospitalInfo.phone}
+- Address: ${context.hospitalInfo.address}
+- Email: ${context.hospitalInfo.email}
+
+# DOCTORS:
+1. Dr. Akhilesh Kumar - Physician & Diabetes Specialist
 2. Dr. Ankit Shukla - Neurologist
-3. Dr. A.K. Singh - ENT
-4. Dr. Anand Mishra - Dental
+3. Dr. A.K. Singh - ENT Specialist
+4. Dr. Anand Mishra - Dental Specialist
 
-Tests: CBC, Blood Sugar, Thyroid, LFT, KFT, Lipid, Urine
+# LAB TESTS:
+CBC, Blood Sugar, Thyroid, LFT, KFT, Lipid Profile, Urine Test
 
-Patient message: "${message}"
+# PATIENT CONTEXT:
+${context.patientContext}
 
-Provide appropriate response:`;
+# YOUR CAPABILITIES:
+1. Emergency detection and management
+2. Doctor appointment booking
+3. Lab test booking
+4. Patient history checking
+5. Natural conversation
+6. Admin notifications
+
+# RESPONSE FORMAT (JSON):
+{
+  "reply": "Natural response to patient",
+  "actions": [
+    {
+      "type": "book_appointment",
+      "doctor_name": "Doctor name",
+      "date": "Date",
+      "time": "Time",
+      "department": "Department"
+    }
+  ],
+  "notifyAdmin": "Optional admin message"
+}
+
+# IMPORTANT:
+- Never mention prices
+- Be polite and helpful
+- Guide immediately in emergencies
+- Use natural conversation style
+
+# CURRENT CONVERSATION:
+Patient: ${context.userName} (${context.userPhone})
+Message: "${context.userMessage}"
+`;
 
   try {
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -273,36 +288,347 @@ Provide appropriate response:`;
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
+        model: "llama3-70b-8192",
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: message }
+          { 
+            role: "system", 
+            content: systemPrompt 
+          },
+          { 
+            role: "user", 
+            content: `Patient message: "${context.userMessage}"` 
+          }
         ],
-        temperature: 0.5,
-        max_tokens: 150
+        temperature: 0.4,
+        max_tokens: 500,
+        response_format: { type: "json_object" }
       })
     });
 
     if (!response.ok) {
-      throw new Error(`AI API error: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`Groq API error ${response.status}: ${errorText}`);
     }
 
     const data = await response.json();
-    return data.choices[0].message.content.trim();
+    const aiResponse = JSON.parse(data.choices[0].message.content);
+    
+    // Ensure reply exists
+    if (!aiResponse.reply) {
+      aiResponse.reply = context.language === 'hi'
+        ? "माफ़ करें, तकनीकी समस्या आ रही है। कृपया फिर से बताएं।"
+        : "Sorry, technical issue. Please repeat your message.";
+    }
+    
+    return aiResponse;
     
   } catch (error) {
-    console.error("AI error:", error);
-    return lang === 'hi' 
-      ? "माफ़ करें, तकनीकी समस्या आ रही है। कृपया फिर से बताएं।"
-      : "Sorry, technical issue. Please repeat your message.";
+    console.error("AI call failed:", error);
+    
+    // Fallback response
+    return {
+      reply: context.language === 'hi'
+        ? "नमस्ते! मैं RPL Hospital का AI receptionist हूं। आप कैसे मदद चाहते हैं? क्या आप डॉक्टर से मिलना चाहते हैं या टेस्ट कराना चाहते हैं?"
+        : "Hello! I'm RPL Hospital AI receptionist. How can I help you? Are you looking to see a doctor or get a test done?",
+      actions: []
+    };
   }
 }
 
 // =============================================
-// UTILITY FUNCTIONS (ERROR HANDLED)
+// 4. AI ACTIONS EXECUTOR
 // =============================================
 
-async function sendWhatsApp(env, to, text) {
+async function executeAIActions(env, actions, phone, name, language) {
+  for (const action of actions) {
+    try {
+      switch (action.type) {
+        
+        case "book_appointment":
+          await bookAppointmentFromAction(env, phone, name, action, language);
+          break;
+          
+        case "book_lab_test":
+          await bookLabTestFromAction(env, phone, name, action, language);
+          break;
+          
+        case "update_patient_record":
+          await updatePatientRecord(env.DB, phone, name, action.details);
+          break;
+          
+        case "create_followup":
+          await createFollowupReminder(env, phone, name, action);
+          break;
+      }
+    } catch (error) {
+      console.error(`Action ${action.type} failed:`, error);
+    }
+  }
+}
+
+async function bookAppointmentFromAction(env, phone, name, action, language) {
+  const doctor = action.doctor_name || "Dr. Akhilesh Kumar";
+  const date = action.date || "today";
+  const time = action.time || "2:00 PM";
+  const department = action.department || "General";
+  
+  const token = Math.floor(1000 + Math.random() * 9000);
+  
+  try {
+    // Save to appointments
+    await env.DB.prepare(
+      `INSERT INTO appointments 
+       (phone_number, patient_name, doctor_name, department, appointment_date, appointment_time, token_number, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed')`
+    ).bind(phone, name, doctor, department, date, time, token).run();
+    
+    // Update patient record
+    await updatePatientRecord(env.DB, phone, name, {
+      last_appointment: date,
+      last_doctor: doctor
+    });
+    
+    console.log(`✅ Appointment booked: ${name} with ${doctor}`);
+    
+    // Notify admin
+    const adminMsg = language === 'hi'
+      ? `📅 नई अपॉइंटमेंट\n\nमरीज: ${name}\nफोन: ${phone}\nडॉक्टर: ${doctor}\nदिनांक: ${date}\nसमय: ${time}\nटोकन: ${token}`
+      : `📅 New Appointment\n\nPatient: ${name}\nPhone: ${phone}\nDoctor: ${doctor}\nDate: ${date}\nTime: ${time}\nToken: ${token}`;
+    
+    await notifyAdmin(env, adminMsg);
+    
+  } catch (error) {
+    console.error("Appointment booking failed:", error);
+  }
+}
+
+async function bookLabTestFromAction(env, phone, name, action, language) {
+  const test = action.test_name || "General Checkup";
+  const date = action.date || "today";
+  const time = action.time || "10:00 AM";
+  
+  try {
+    await env.DB.prepare(
+      `INSERT INTO lab_tests 
+       (phone_number, patient_name, test_name, test_date, test_time, status)
+       VALUES (?, ?, ?, ?, ?, 'booked')`
+    ).bind(phone, name, test, date, time).run();
+    
+    console.log(`✅ Lab test booked: ${test} for ${name}`);
+    
+    // Notify admin
+    const adminMsg = language === 'hi'
+      ? `🧪 नया लैब टेस्ट\n\nमरीज: ${name}\nफोन: ${phone}\nटेस्ट: ${test}\nदिनांक: ${date}\nसमय: ${time}`
+      : `🧪 New Lab Test\n\nPatient: ${name}\nPhone: ${phone}\nTest: ${test}\nDate: ${date}\nTime: ${time}`;
+    
+    await notifyAdmin(env, adminMsg);
+    
+  } catch (error) {
+    console.error("Lab test booking failed:", error);
+  }
+}
+
+// =============================================
+// 5. EMERGENCY HANDLER
+// =============================================
+
+function isEmergencySituation(text) {
+  const lowerText = text.toLowerCase();
+  const emergencies = [
+    "बेहोश", "सांस नहीं", "खून बह रहा", "दौरा", "लकवा", "हार्ट अटैक", "एक्सीडेंट",
+    "unconscious", "can't breathe", "bleeding", "seizure", "stroke", "heart attack", "accident"
+  ];
+  
+  return emergencies.some(emergency => lowerText.includes(emergency));
+}
+
+async function handleEmergencySituation(env, phone, name, message, language) {
+  // Immediate response
+  const emergencyReply = language === 'hi'
+    ? `🚨 **आपातकालीन स्थिति** 🚨\n\nकृपया तुरंत ${env.HOSPITAL_PHONE} पर कॉल करें या सीधे अस्पताल आएं।\n\nपता: ${env.HOSPITAL_ADDRESS}\nआपातकालीन नंबर: ${env.HOSPITAL_PHONE}\n\nअपना नाम और लक्षण रिसेप्शन पर बताएं।`
+    : `🚨 **EMERGENCY SITUATION** 🚨\n\nPlease call ${env.HOSPITAL_PHONE} immediately or come directly to hospital.\n\nAddress: ${env.HOSPITAL_ADDRESS}\nEmergency Number: ${env.HOSPITAL_PHONE}\n\nTell your name and symptoms at reception.`;
+  
+  await sendWhatsAppMessage(env, phone, emergencyReply, "emergency");
+  
+  // Urgent admin notification
+  const adminMsg = language === 'hi'
+    ? `🚨🚨 आपातकालीन चेतावनी 🚨🚨\n\nमरीज: ${name}\nफोन: ${phone}\nसंदेश: ${message}\nसमय: ${new Date().toLocaleString("en-IN")}\n\nतुरंत संपर्क करें!`
+    : `🚨🚨 EMERGENCY ALERT 🚨🚨\n\nPatient: ${name}\nPhone: ${phone}\nMessage: ${message}\nTime: ${new Date().toLocaleString("en-IN")}\n\nContact immediately!`;
+  
+  await notifyAdmin(env, adminMsg);
+}
+
+// =============================================
+// 6. SESSION MANAGEMENT (COMPLETE)
+// =============================================
+
+async function getCompleteSession(kv, phone, name) {
+  try {
+    const sessionData = await kv.get(`session_${phone}`, { type: "json" });
+    
+    if (sessionData) {
+      // Check if session expired (1 hour)
+      if (Date.now() - sessionData.lastActive > 60 * 60 * 1000) {
+        return createNewCompleteSession(phone, name);
+      }
+      return sessionData;
+    }
+    
+    return createNewCompleteSession(phone, name);
+    
+  } catch (error) {
+    console.error("Session read error:", error);
+    return createNewCompleteSession(phone, name);
+  }
+}
+
+function createNewCompleteSession(phone, name) {
+  return {
+    id: `sess_${Date.now()}`,
+    phone: phone,
+    name: name,
+    preferredLanguage: null,
+    lastIntent: null,
+    lastAppointment: null,
+    lastLabTest: null,
+    messageCount: 0,
+    lastActive: Date.now(),
+    createdAt: Date.now(),
+    metadata: {}
+  };
+}
+
+async function saveCompleteSession(kv, phone, session) {
+  try {
+    await kv.put(
+      `session_${phone}`,
+      JSON.stringify(session),
+      { expirationTtl: 7 * 24 * 60 * 60 } // 7 days
+    );
+  } catch (error) {
+    console.error("Session save error:", error);
+  }
+}
+
+// =============================================
+// 7. PATIENT CONTEXT BUILDER
+// =============================================
+
+async function getCompletePatientContext(db, phone, name) {
+  try {
+    let context = `रोगी: ${name}\nफोन: ${phone}\n\n`;
+    
+    // Check patient record
+    const patient = await db.prepare(
+      `SELECT * FROM patients WHERE phone_number = ?`
+    ).bind(phone).first();
+    
+    if (patient) {
+      context += `पहली विज़िट: ${patient.first_visit || "Unknown"}\n`;
+      context += `कुल विज़िट: ${patient.total_visits || 0}\n`;
+    } else {
+      context += `स्थिति: नया रोगी\n`;
+    }
+    
+    // Last 2 appointments
+    const appointments = await db.prepare(
+      `SELECT doctor_name, appointment_date, appointment_time 
+       FROM appointments 
+       WHERE phone_number = ? 
+       ORDER BY created_at DESC 
+       LIMIT 2`
+    ).bind(phone).all();
+    
+    if (appointments.results.length > 0) {
+      context += "\nहाल की अपॉइंटमेंट:\n";
+      appointments.results.forEach((apt, i) => {
+        context += `${i+1}. डॉ. ${apt.doctor_name} - ${apt.appointment_date} ${apt.appointment_time}\n`;
+      });
+    }
+    
+    // Last lab test
+    const labTests = await db.prepare(
+      `SELECT test_name, test_date 
+       FROM lab_tests 
+       WHERE phone_number = ? 
+       ORDER BY created_at DESC 
+       LIMIT 1`
+    ).bind(phone).all();
+    
+    if (labTests.results.length > 0) {
+      context += `\nआखिरी टेस्ट: ${labTests.results[0].test_name} (${labTests.results[0].test_date})\n`;
+    }
+    
+    return context;
+    
+  } catch (error) {
+    console.error("Patient context error:", error);
+    return `रोगी: ${name}\nफोन: ${phone}\nस्थिति: इतिहास लोड नहीं हो सका`;
+  }
+}
+
+async function updatePatientRecord(db, phone, name, details) {
+  try {
+    const existing = await db.prepare(
+      `SELECT * FROM patients WHERE phone_number = ?`
+    ).bind(phone).first();
+    
+    if (existing) {
+      // Update existing
+      await db.prepare(
+        `UPDATE patients 
+         SET last_visit = CURRENT_TIMESTAMP,
+             total_visits = total_visits + 1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE phone_number = ?`
+      ).bind(phone).run();
+    } else {
+      // Create new
+      await db.prepare(
+        `INSERT INTO patients 
+         (phone_number, name, first_visit, last_visit, total_visits)
+         VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)`
+      ).bind(phone, name).run();
+    }
+    
+  } catch (error) {
+    console.error("Patient update error:", error);
+  }
+}
+
+// =============================================
+// 8. UTILITY FUNCTIONS
+// =============================================
+
+function detectLanguageWithContext(text, session) {
+  // Check session preference first
+  if (session.preferredLanguage) {
+    return {
+      language: session.preferredLanguage,
+      isLanguageRequest: false
+    };
+  }
+  
+  const lowerText = text.toLowerCase();
+  
+  // Hindi detection
+  const hindiPatterns = [
+    /[\u0900-\u097F]/, // Hindi chars
+    /\b(नमस्ते|हिंदी|बोलो|कैसे|क्या|में|हूं|है|धन्यवाद|जी|ठीक)\b/,
+    /hindi\s+bolo/i,
+    /हिंदी\s+बोलो/i
+  ];
+  
+  const isHindi = hindiPatterns.some(pattern => pattern.test(text));
+  const isLanguageRequest = /(hindi|हिंदी).*(bolo|बोलो|speak)/i.test(text);
+  
+  return {
+    language: isHindi ? 'hi' : 'en',
+    isLanguageRequest: isLanguageRequest
+  };
+}
+
+async function sendWhatsAppMessage(env, to, text, referenceId) {
   try {
     const response = await fetch(
       `https://graph.facebook.com/v20.0/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
@@ -317,35 +643,47 @@ async function sendWhatsApp(env, to, text) {
           recipient_type: "individual",
           to: to,
           type: "text",
-          text: { body: text }
+          text: { body: text },
+          context: referenceId ? { message_id: referenceId } : undefined
         })
       }
     );
     
     if (!response.ok) {
-      const error = await response.text();
-      console.error("WhatsApp API error:", error);
+      const errorText = await response.text();
+      console.error(`WhatsApp API error ${response.status}: ${errorText}`);
     }
     
   } catch (error) {
-    console.error("Send WhatsApp error:", error);
+    console.error("WhatsApp send error:", error);
   }
 }
 
-async function logInteraction(db, data) {
+async function notifyAdmin(env, message) {
   try {
-    // Log incoming
+ await sendWhatsAppMessage(
+      env,
+      env.HOSPITAL_NOTIFICATION_NUMBER,
+      message,
+      `admin_${Date.now()}`
+    );
+  } catch (error) {
+    console.error("Admin notify error:", error);
+  }
+}
+
+async function safeLog(db, phone, direction, content, messageId) {
+  try {
     await db.prepare(
-      `INSERT INTO message_logs (phone_number, direction, message_content, timestamp)
-       VALUES (?, 'incoming', ?, CURRENT_TIMESTAMP)`
-    ).bind(data.phone, data.incoming.substring(0, 500)).run();
-    
-    // Log outgoing
-    await db.prepare(
-      `INSERT INTO message_logs (phone_number, direction, message_content, timestamp)
-       VALUES (?, 'outgoing', ?, CURRENT_TIMESTAMP)`
-    ).bind(data.phone, data.outgoing.substring(0, 500)).run();
-    
+      `INSERT INTO message_logs 
+       (phone_number, direction, message_type, message_content, message_id, timestamp)
+       VALUES (?, ?, 'text', ?, ?, CURRENT_TIMESTAMP)`
+    ).bind(
+      phone,
+      direction,
+      content.substring(0, 500),
+      messageId || `unknown_${Date.now()}`
+    ).run();
   } catch (error) {
     console.error("Log error:", error);
   }
@@ -363,3 +701,67 @@ function verifyWebhook(request, env) {
   
   return new Response("Forbidden", { status: 403 });
 }
+
+// =============================================
+// 9. SCHEDULED TASKS (CRON JOBS)
+// =============================================
+
+export async function scheduled(event, env, ctx) {
+  switch (event.cron) {
+    case "0 8 * * *": // 8 AM - Appointment reminders
+      await sendAppointmentReminders(env);
+      break;
+      
+    case "0 21 * * *": // 9 PM - Daily summary
+      await sendDailySummary(env);
+      break;
+  }
+}
+
+async function sendAppointmentReminders(env) {
+  try {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const dateStr = tomorrow.toISOString().split('T')[0];
+    
+    const appointments = await env.DB.prepare(
+      `SELECT phone_number, patient_name, doctor_name, appointment_time 
+       FROM appointments 
+       WHERE appointment_date LIKE ? AND status = 'confirmed'`
+    ).bind(`%${dateStr}%`).all();
+    
+    for (const apt of appointments.results) {
+      const message = `⏰ अपॉइंटमेंट रिमाइंडर\n\nनमस्ते ${apt.patient_name} जी,\n\nआपकी कल डॉक्टर ${apt.doctor_name} के साथ ${apt.appointment_time} बजे अपॉइंटमेंट है।\n\nकृपया समय पर पहुँचें।\n\nधन्यवाद,\nRPL Hospital`;
+      
+      await sendWhatsAppMessage(env, apt.phone_number, message, "reminder");
+    }
+  } catch (error) {
+    console.error("Reminder error:", error);
+  }
+}
+
+async function sendDailySummary(env) {
+  try {
+    const today = new Date().toLocaleDateString("en-IN");
+    
+    const stats = await env.DB.prepare(`
+      SELECT 
+        COUNT(*) as total_messages,
+        COUNT(DISTINCT phone_number) as unique_pessages
+      FROM message_logs 
+      WHERE DATE(timestamp) = DATE('now')
+    `).first();
+    
+    const appointments = await env.DB.prepare(`
+      SELECT COUNT(*) as new_appointments
+      FROM appointments 
+      WHERE DATE(created_at) = DATE('now')
+    `).first();
+    
+    const message = `📊 दैनिक सारांश (${today})\n\n• नए संदेश: ${stats.total_messages}\n• नए मरीज: ${stats.unique_pessages}\n• नई अपॉइंटमेंट: ${appointments.new_appointments}\n\nRPL Hospital AI Receptionist`;
+    
+    await notifyAdmin(env, message);
+  } catch (error) {
+    console.error("Summary error:", error);
+  }
+  }
