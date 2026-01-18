@@ -1,7 +1,6 @@
 /**
- * WhatsApp Webhook Handler - FIXED VERSION
+ * WhatsApp Webhook Handler
  * Handles incoming messages and webhook verification
- * ✅ Stream error fixed - body read BEFORE any response
  */
 
 import { WhatsAppAPI } from '../services/whatsapp.js';
@@ -9,163 +8,159 @@ import { MessageProcessor } from '../services/message-processor.js';
 import { SessionManager } from '../services/session.js';
 
 /**
- * Main fetch handler - FIXED!
+ * Main Worker Entry
  */
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
 
-    // 1. GET verification - NO CHANGE
-    if (request.method === 'GET' && url.pathname === '/webhook') {
+    if (request.method === 'GET') {
       return verifyWebhook(request, env);
     }
 
-    // 2. POST webhook - FIXED: handleWebhook को await + response AFTER
-    if (request.method === 'POST' && url.pathname === '/webhook') {
-      await handleWebhook(request, env);  // 🔥 NO RETURN
-      return new Response('OK', { status: 200 });  // 🔥 RESPONSE LAST
+    if (request.method === 'POST') {
+      let body;
+
+      try {
+        body = await request.json();   // 🔥 stream sirf yahan read hoga
+      } catch (err) {
+        console.error("Invalid JSON:", err);
+        return new Response("Bad Request", { status: 400 });
+      }
+
+      try {
+        await handleWebhookBody(body, env);
+      } catch (error) {
+        console.error("Webhook handler error:", error);
+      }
+
+      // Meta ko hamesha fast ACK chahiye
+      return new Response("EVENT_RECEIVED", { status: 200 });
     }
 
-    return new Response('Not found', { status: 404 });
+    return new Response("Method Not Allowed", { status: 405 });
   }
 };
 
 /**
- * Verify webhook subscription from Meta - NO CHANGE
+ * Verify webhook subscription from Meta
  */
 export function verifyWebhook(request, env) {
-    const url = new URL(request.url);
-    const mode = url.searchParams.get('hub.mode');
-    const token = url.searchParams.get('hub.verify_token');
-    const challenge = url.searchParams.get('hub.challenge');
+  const url = new URL(request.url);
+  const mode = url.searchParams.get('hub.mode');
+  const token = url.searchParams.get('hub.verify_token');
+  const challenge = url.searchParams.get('hub.challenge');
 
-    if (mode === 'subscribe' && token === env.WHATSAPP_VERIFY_TOKEN) {
-        console.log('Webhook verified successfully');
-        return new Response(challenge, { status: 200 });
-    }
+  if (mode === 'subscribe' && token === env.WHATSAPP_VERIFY_TOKEN) {
+    console.log('Webhook verified successfully');
+    return new Response(challenge, { status: 200 });
+  }
 
-    console.error('Webhook verification failed');
-    return new Response('Forbidden', { status: 403 });
+  console.error('Webhook verification failed');
+  return new Response('Forbidden', { status: 403 });
 }
 
 /**
- * Handle incoming webhook messages - FIXED: NO RETURN Response
+ * Handle incoming webhook messages (body already parsed)
  */
-export async function handleWebhook(request, env) {
+export async function handleWebhookBody(body, env) {
+  console.log('Webhook received:', JSON.stringify(body, null, 2));
+
+  const value = body.entry?.[0]?.changes?.[0]?.value;
+  if (!value) {
+    console.log('No value object in webhook');
+    return;
+  }
+
+  const messages = value.messages || [];
+  const contacts = value.contacts || [];
+
+  // Initialize services
+  const whatsapp = new WhatsAppAPI(env);
+  const sessionManager = new SessionManager(env.DB);
+  const processor = new MessageProcessor(env, whatsapp, sessionManager);
+
+  // Process messages
+  for (const message of messages) {
+    const phoneNumber = message.from;
+    const contact = contacts.find(c => c.wa_id === phoneNumber);
+    const senderName = contact?.profile?.name || 'User';
+
+    console.log(`Processing message from ${phoneNumber} (${senderName}):`, message);
+
     try {
-        // ✅ BODY FIRST - Stream safe
-        const body = await request.json();
-        console.log('Webhook received:', JSON.stringify(body, null, 2));
-
-        // Check if this is a WhatsApp message
-        if (!body.entry?.[0]?.changes?.[0]?.value?.messages) {
-            console.log('No messages in webhook');
-            return;  // ✅ NO Response - just return
-        }
-
-        const value = body.entry[0].changes[0].value;
-        const messages = value.messages;
-        const contacts = value.contacts;
-
-        // Initialize services - NO CHANGE
-        const whatsapp = new WhatsAppAPI(env);
-        const sessionManager = new SessionManager(env.DB);
-        const processor = new MessageProcessor(env, whatsapp, sessionManager);
-
-        // Process each message - NO CHANGE
-        for (const message of messages) {
-            const phoneNumber = message.from;
-            const contact = contacts?.find(c => c.wa_id === phoneNumber);
-            const senderName = contact?.profile?.name || 'User';
-
-            console.log(`Processing message from ${phoneNumber} (${senderName}):`, message);
-
-            try {
-                // Log incoming message
-                await logMessage(env.DB, phoneNumber, 'incoming', message);
-
-                // Mark message as read
-                await whatsapp.markAsRead(message.id);
-
-                // Process the message based on type
-                await processor.processMessage(message, phoneNumber, senderName);
-
-            } catch (error) {
-                console.error(`Error processing message from ${phoneNumber}:`, error);
-
-                // Send error message to user
-                await whatsapp.sendTextMessage(
-                    phoneNumber,
-                    '❌ Sorry, something went wrong. Please try again or type "menu" to start over.'
-                );
-            }
-        }
-
-        // Handle status updates (delivered, read, etc.)
-        if (value.statuses) {
-            for (const status of value.statuses) {
-                await updateMessageStatus(env.DB, status);
-            }
-        }
-
+      await logMessage(env.DB, phoneNumber, 'incoming', message);
+      await whatsapp.markAsRead(message.id);
+      await processor.processMessage(message, phoneNumber, senderName);
     } catch (error) {
-        console.error('Webhook handler error:', error);
+      console.error(`Error processing message from ${phoneNumber}:`, error);
+
+      await whatsapp.sendTextMessage(
+        phoneNumber,
+        '❌ Sorry, something went wrong. Please try again or type "menu" to start over.'
+      );
     }
-    // ✅ NO RETURN Response - main fetch handles it
+  }
+
+  // Handle status updates
+  if (value.statuses) {
+    for (const status of value.statuses) {
+      await updateMessageStatus(env.DB, status);
+    }
+  }
 }
 
 /**
- * Log message to database - NO CHANGE
+ * Log message to database
  */
 async function logMessage(db, phoneNumber, direction, message) {
-    const messageType = message.type || 'text';
-    let content = '';
+  const messageType = message.type || 'text';
+  let content = '';
 
-    switch (messageType) {
-        case 'text':
-            content = message.text?.body || '';
-            break;
-        case 'interactive':
-            if (message.interactive?.type === 'button_reply') {
-                content = `Button: ${message.interactive.button_reply.id} - ${message.interactive.button_reply.title}`;
-            } else if (message.interactive?.type === 'list_reply') {
-                content = `List: ${message.interactive.list_reply.id} - ${message.interactive.list_reply.title}`;
-            }
-            break;
-        case 'image':
-            content = `[Image] ${message.image?.caption || ''}`;
-            break;
-        case 'document':
-            content = `[Document] ${message.document?.filename || ''}`;
-            break;
-        case 'location':
-            content = `[Location] ${message.location?.latitude}, ${message.location?.longitude}`;
-            break;
-        default:
-            content = `[${messageType}]`;
-    }
+  switch (messageType) {
+    case 'text':
+      content = message.text?.body || '';
+      break;
+    case 'interactive':
+      if (message.interactive?.type === 'button_reply') {
+        content = `Button: ${message.interactive.button_reply.id} - ${message.interactive.button_reply.title}`;
+      } else if (message.interactive?.type === 'list_reply') {
+        content = `List: ${message.interactive.list_reply.id} - ${message.interactive.list_reply.title}`;
+      }
+      break;
+    case 'image':
+      content = `[Image] ${message.image?.caption || ''}`;
+      break;
+    case 'document':
+      content = `[Document] ${message.document?.filename || ''}`;
+      break;
+    case 'location':
+      content = `[Location] ${message.location?.latitude}, ${message.location?.longitude}`;
+      break;
+    default:
+      content = `[${messageType}]`;
+  }
 
-    try {
-        await db.prepare(`
-            INSERT INTO message_logs (phone_number, direction, message_type, message_content, whatsapp_message_id)
-            VALUES (?, ?, ?, ?, ?)
-        `).bind(phoneNumber, direction, messageType, content, message.id).run();
-    } catch (error) {
-        console.error('Error logging message:', error);
-    }
+  try {
+    await db.prepare(`
+      INSERT INTO message_logs (phone_number, direction, message_type, message_content, whatsapp_message_id)
+      VALUES (?, ?, ?, ?, ?)
+    `).bind(phoneNumber, direction, messageType, content, message.id).run();
+  } catch (error) {
+    console.error('Error logging message:', error);
+  }
 }
 
 /**
- * Update message status in database - NO CHANGE
+ * Update message status in database
  */
 async function updateMessageStatus(db, status) {
-    try {
-        await db.prepare(`
-            UPDATE message_logs 
-            SET status = ?
-            WHERE whatsapp_message_id = ?
-        `).bind(status.status, status.id).run();
-    } catch (error) {
-        console.error('Error updating message status:', error);
-    }
+  try {
+    await db.prepare(`
+      UPDATE message_logs 
+      SET status = ?
+      WHERE whatsapp_message_id = ?
+    `).bind(status.status, status.id).run();
+  } catch (error) {
+    console.error('Error updating message status:', error);
+  }
 }
