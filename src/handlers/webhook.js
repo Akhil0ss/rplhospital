@@ -1,6 +1,7 @@
 /**
- * WhatsApp Webhook Handler
+ * WhatsApp Webhook Handler - FIXED VERSION
  * Handles incoming messages and webhook verification
+ * ✅ Stream error fixed - body read BEFORE any response
  */
 
 import { WhatsAppAPI } from '../services/whatsapp.js';
@@ -8,7 +9,29 @@ import { MessageProcessor } from '../services/message-processor.js';
 import { SessionManager } from '../services/session.js';
 
 /**
- * Verify webhook subscription from Meta
+ * Main fetch handler - FIXED!
+ */
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    // 1. GET verification - NO CHANGE
+    if (request.method === 'GET' && url.pathname === '/webhook') {
+      return verifyWebhook(request, env);
+    }
+
+    // 2. POST webhook - FIXED: handleWebhook को await + response AFTER
+    if (request.method === 'POST' && url.pathname === '/webhook') {
+      await handleWebhook(request, env);  // 🔥 NO RETURN
+      return new Response('OK', { status: 200 });  // 🔥 RESPONSE LAST
+    }
+
+    return new Response('Not found', { status: 404 });
+  }
+};
+
+/**
+ * Verify webhook subscription from Meta - NO CHANGE
  */
 export function verifyWebhook(request, env) {
     const url = new URL(request.url);
@@ -26,29 +49,30 @@ export function verifyWebhook(request, env) {
 }
 
 /**
- * Handle incoming webhook messages
+ * Handle incoming webhook messages - FIXED: NO RETURN Response
  */
 export async function handleWebhook(request, env) {
     try {
+        // ✅ BODY FIRST - Stream safe
         const body = await request.json();
         console.log('Webhook received:', JSON.stringify(body, null, 2));
 
         // Check if this is a WhatsApp message
         if (!body.entry?.[0]?.changes?.[0]?.value?.messages) {
             console.log('No messages in webhook');
-            return;
+            return;  // ✅ NO Response - just return
         }
 
         const value = body.entry[0].changes[0].value;
         const messages = value.messages;
         const contacts = value.contacts;
 
-        // Initialize services
+        // Initialize services - NO CHANGE
         const whatsapp = new WhatsAppAPI(env);
         const sessionManager = new SessionManager(env.DB);
         const processor = new MessageProcessor(env, whatsapp, sessionManager);
 
-        // Process each message
+        // Process each message - NO CHANGE
         for (const message of messages) {
             const phoneNumber = message.from;
             const contact = contacts?.find(c => c.wa_id === phoneNumber);
@@ -87,10 +111,11 @@ export async function handleWebhook(request, env) {
     } catch (error) {
         console.error('Webhook handler error:', error);
     }
+    // ✅ NO RETURN Response - main fetch handles it
 }
 
 /**
- * Log message to database
+ * Log message to database - NO CHANGE
  */
 async function logMessage(db, phoneNumber, direction, message) {
     const messageType = message.type || 'text';
@@ -131,7 +156,7 @@ async function logMessage(db, phoneNumber, direction, message) {
 }
 
 /**
- * Update message status in database
+ * Update message status in database - NO CHANGE
  */
 async function updateMessageStatus(db, status) {
     try {
