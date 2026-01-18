@@ -64,25 +64,6 @@ async function handleIncoming(request, env, ctx) {
   }
 }
 
-// ---------------------------------------------
-// Natural Language AI Router (Human-like)
-// ---------------------------------------------
-async function aiRouter(env, userText, phone, name, session) {
-  const lang = detectLanguage(userText);
-
-  // Emergency detection
-  if (isEmergency(userText)) {
-    await notifyAdmin(env, `🚨 EMERGENCY ALERT\nPatient: ${name}\nPhone: ${phone}\nMessage: ${userText}`);
-    return lang === "hi"
-      ? `यह स्थिति गंभीर लग रही है। कृपया तुरंत ${env.HOSPITAL_PHONE} पर कॉल करें या सीधे अस्पताल आइए।`
-      : `This seems serious. Please call ${env.HOSPITAL_PHONE} immediately or come to the hospital.`;
-  }
-
-  // Ask Groq AI for intent understanding
-  const aiReply = await askGroq(env, userText, lang);
-
-  return aiReply;
-}
 
 // ---------------------------------------------
 // Language Detection (Simple Heuristic)
