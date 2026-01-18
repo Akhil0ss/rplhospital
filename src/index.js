@@ -1,6 +1,6 @@
 // =============================================
-// RPL HOSPITAL – FIXED AI RECEPTIONIST
-// PROPER LANGUAGE DETECTION + CONTEXT AWARE
+// RPL HOSPITAL – ERROR FIXED VERSION
+// PROPER REQUEST HANDLING WITH STREAM MANAGEMENT
 // =============================================
 
 export default {
@@ -8,285 +8,262 @@ export default {
     try {
       const url = new URL(request.url);
       
+      // ✅ HEALTH CHECK
+      if (url.pathname === "/health") {
+        return new Response(JSON.stringify({
+          status: "active",
+          service: "rpl-ai-receptionist",
+          timestamp: new Date().toISOString()
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      
+      // ✅ WEBHOOK VERIFICATION
       if (request.method === "GET" && url.pathname === "/webhook") {
         return verifyWebhook(request, env);
       }
       
+      // ✅ INCOMING MESSAGE - FIXED VERSION
       if (request.method === "POST" && url.pathname === "/webhook") {
-        ctx.waitUntil(processMessage(request, env));
+        // IMPORTANT: Read request body BEFORE returning response
+        const requestClone = request.clone();
+        const body = await requestClone.json();
+        
+        // Process asynchronously but safely
+        ctx.waitUntil(processWebhookMessage(body, env));
+        
         return new Response("OK", { status: 200 });
       }
       
       return new Response("Not Found", { status: 404 });
+      
     } catch (error) {
-      console.error("Global error:", error);
+      console.error("Fetch error:", error);
       return new Response("Server Error", { status: 500 });
     }
   }
 };
 
 // =============================================
-// IMPROVED LANGUAGE DETECTION
+// FIXED WEBHOOK PROCESSOR
 // =============================================
 
-function detectLanguageAndIntent(text) {
-  const lowerText = text.toLowerCase().trim();
-  
-  // HINDI DETECTION (IMPROVED)
-  const hindiIndicators = [
-    // Hindi characters
-    /[\u0900-\u097F]/,
-    // Common Hindi words
-    /\b(नमस्ते|हैलो|हां|नहीं|कैसे|क्या|में|हूं|है|हैं|बोलो|बोल|हिंदी|कृपया|धन्यवाद|जी|ठीक|अच्छा)\b/,
-    // Hindi instruction patterns
-    /hindi\s+bolo/i,
-    /हिंदी\s+बोलो/i,
-    /हिंदी\s+में\s+बात/i
-  ];
-  
-  const isHindi = hindiIndicators.some(pattern => pattern.test(text));
-  
-  // INTENT DETECTION
-  const intents = {
-    greeting: /\b(hi|hello|hey|नमस्ते|हैलो|हाय|गुड\s*मॉर्निंग)\b/i.test(lowerText),
-    languageRequest: /(hindi|हिंदी).*(bolo|बोलो|speak|talk)/i.test(text) ||
-                    /(bolo|बोलो).*(hindi|हिंदी)/i.test(text),
-    emergency: /\b(emergency|आपात|बेहोश|सांस|खून|दर्द|एक्सीडेंट|accident)\b/i.test(lowerText),
-    appointment: /\b(appointment|डॉक्टर|दिखाना|चेकअप|consult|कंसल्ट)\b/i.test(lowerText),
-    labtest: /\b(test|टेस्ट|जांच|लैब|blood|खून|urine|पेशाब)\b/i.test(lowerText)
-  };
-  
-  return {
-    language: isHindi ? 'hi' : 'en',
-    intents: intents,
-    isLanguageSwitchRequest: intents.languageRequest
-  };
-}
-
-// =============================================
-// CONTEXT-AWARE MESSAGE PROCESSOR
-// =============================================
-
-async function processMessage(request, env) {
+async function processWebhookMessage(body, env) {
   try {
-    const body = await request.json();
-    const message = body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-    const contact = body.entry?.[0]?.changes?.[0]?.value?.contacts?.[0];
+    const entry = body.entry?.[0];
+    if (!entry) return;
     
-    if (!message || message.type !== "text") return;
+    const change = entry.changes?.[0];
+    if (!change || change.field !== "messages") return;
     
-    const userPhone = message.from;
-    const userName = contact?.profile?.name || "मरीज";
-    const userMessage = message.text.body;
-    const messageId = message.id;
+    const value = change.value;
+    const messages = value.messages || [];
+    const contacts = value.contacts || [];
     
-    console.log(`📞 ${userPhone}: "${userMessage}"`);
-    
-    // GET OR CREATE SESSION WITH CONTEXT
-    const session = await getOrCreateSession(env.SESSIONS, userPhone, userName);
-    
-    // DETECT LANGUAGE AND INTENT
-    const detection = detectLanguageAndIntent(userMessage);
-    
-    // UPDATE SESSION WITH PREFERRED LANGUAGE
-    if (detection.isLanguageSwitchRequest) {
-      session.preferredLanguage = 'hi';
-      session.languageSwitchRequested = true;
-    }
-    
-    // USE PREFERRED LANGUAGE IF SET, OTHERWUSE DETECTED
-    const replyLanguage = session.preferredLanguage || detection.language;
-    
-    // STORE IN CONVERSATION HISTORY
-    if (!session.conversation) session.conversation = [];
-    session.conversation.push({
-      role: 'user',
-      content: userMessage,
-      timestamp: new Date().toISOString()
-    });
-    
-    // KEEP ONLY LAST 10 MESSAGES
-    if (session.conversation.length > 10) {
-      session.conversation = session.conversation.slice(-10);
-    }
-    
-    // GENERATE RESPONSE BASED ON CONTEXT
-    let response;
-    
-    // CASE 1: User explicitly asking for Hindi
-    if (userMessage.toLowerCase().includes("hindi bolo") || 
-        userMessage.includes("हिंदी बोलो")) {
-      session.preferredLanguage = 'hi';
-      response = "जी अबसे हिंदी में बात करूंगा! आप कैसे मदद चाहते हैं? क्या आप डॉक्टर से मिलना चाहते हैं या कोई टेस्ट कराना चाहते हैं?";
-    }
-    // CASE 2: Simple greeting in Hindi
-    else if (userMessage === "नमस्ते" || userMessage === "Namaste") {
-      response = "नमस्ते! आप RPL Hospital के AI रिसेप्शनिस्ट से बात कर रहे हैं। आप कैसे मदद चाहते हैं?";
-    }
-    // CASE 3: English greeting
-    else if (userMessage.toLowerCase() === "hi" || userMessage.toLowerCase() === "hello") {
-      // Check if user previously asked for Hindi
-      if (session.preferredLanguage === 'hi') {
-        response = "नमस्ते! आप कैसे मदद चाहते हैं?";
-      } else {
-        response = "Hello! You're speaking with RPL Hospital AI receptionist. How can I help you today?";
+    // Process each message
+    for (const msg of messages) {
+      try {
+        await handleMessage(msg, contacts, env);
+      } catch (msgError) {
+        console.error(`Message ${msg.id} failed:`, msgError);
       }
     }
-    // CASE 4: Handle mixed or unclear messages
-    else {
-      // Use AI for proper response
-      response = await getContextAwareAIResponse(env, {
-        userMessage,
-        userName,
-        userPhone,
-        session,
-        preferredLanguage: replyLanguage,
-        conversationHistory: session.conversation
-      });
-    }
-    
-    // SAVE RESPONSE TO CONVERSATION HISTORY
-    session.conversation.push({
-      role: 'assistant',
-      content: response,
-      timestamp: new Date().toISOString()
-    });
-    
-    // UPDATE SESSION
-    session.lastActive = Date.now();
-    await env.SESSIONS.put(
-      `session_${userPhone}`,
-      JSON.stringify(session),
-      { expirationTtl: 86400 } // 24 hours
-    );
-    
-    // SEND RESPONSE
-    await sendWhatsApp(env, userPhone, response, messageId);
-    
-    // LOG
-    await logMessage(env.DB, userPhone, "incoming", userMessage);
-    await logMessage(env.DB, userPhone, "outgoing", response);
-    
   } catch (error) {
-    console.error("Process error:", error);
+    console.error("Webhook processing error:", error);
   }
 }
 
 // =============================================
-// IMPROVED SESSION MANAGEMENT
+// MESSAGE HANDLER (SIMPLIFIED)
 // =============================================
 
-async function getOrCreateSession(kv, phone, name) {
-  try {
-    const sessionData = await kv.get(`session_${phone}`, { type: "json" });
-    
-    if (sessionData) {
-      // Check if session is expired (30 minutes)
-      if (Date.now() - sessionData.lastActive > 30 * 60 * 1000) {
-        return createNewSession(phone, name);
-      }
-      return sessionData;
-    }
-    
-    return createNewSession(phone, name);
-    
-  } catch (error) {
-    console.error("Session error:", error);
-    return createNewSession(phone, name);
+async function handleMessage(msg, contacts, env) {
+  // Validate message type
+  if (msg.type !== "text") return;
+  
+  const userPhone = msg.from;
+  const contact = contacts.find(c => c.wa_id === userPhone);
+  const userName = contact?.profile?.name || "मरीज";
+  const userMessage = msg.text?.body?.trim() || "";
+  const messageId = msg.id;
+  
+  console.log(`📱 ${userPhone}: ${userMessage.substring(0, 50)}...`);
+  
+  // Get or create session
+  const session = await getSession(env.SESSIONS, userPhone);
+  
+  // Detect language preference
+  const lang = detectLanguage(userMessage, session);
+  
+  // Update session language preference
+  if (userMessage.toLowerCase().includes("hindi bolo") || 
+      userMessage.includes("हिंदी बोलो")) {
+    session.language = 'hi';
+    session.languageSet = true;
   }
+  
+  // Generate response
+  let response;
+  
+  // Handle specific cases
+  if (userMessage.toLowerCase() === "hi" || userMessage.toLowerCase() === "hello") {
+    response = session.language === 'hi' 
+      ? "नमस्ते! आप RPL Hospital के AI रिसेप्शनिस्ट से बात कर रहे हैं। आप कैसे मदद चाहते हैं?"
+      : "Hello! You're speaking with RPL Hospital AI receptionist. How can I help you today?";
+  }
+  else if (userMessage.toLowerCase().includes("hindi bolo") || 
+           userMessage.includes("हिंदी बोलो")) {
+    session.language = 'hi';
+    response = "जी, अब मैं हिंदी में बात करूंगा। आप कैसे मदद चाहते हैं?";
+  }
+  else if (userMessage === "नमस्ते" || userMessage === "Namaste") {
+    response = "नमस्ते! कैसे मदद कर सकता हूं?";
+  }
+  else {
+    // Use AI for other messages
+    response = await getAIResponse(env, userMessage, session.language || lang);
+  }
+  
+  // Save session
+  session.lastActive = Date.now();
+  await saveSession(env.SESSIONS, userPhone, session);
+  
+  // Send response
+  await sendWhatsApp(env, userPhone, response);
+  
+  // Log
+  await logInteraction(env.DB, {
+    phone: userPhone,
+    incoming: userMessage,
+    outgoing: response,
+    messageId
+  });
 }
 
-function createNewSession(phone, name) {
+// =============================================
+// SIMPLIFIED SESSION MANAGEMENT
+// =============================================
+
+async function getSession(kv, phone) {
+  try {
+    const data = await kv.get(`session_${phone}`, { type: "json" });
+    if (data && Date.now() - data.lastActive < 30 * 60 * 1000) {
+      return data;
+    }
+  } catch (error) {
+    console.error("Session read error:", error);
+  }
+  
+  // Default session
   return {
-    id: `sess_${Date.now()}_${phone}`,
     phone: phone,
-    name: name,
-    preferredLanguage: null,
-    conversation: [],
-    lastIntent: null,
-    pendingAction: null,
+    language: null,
     lastActive: Date.now(),
     createdAt: Date.now()
   };
 }
 
+async function saveSession(kv, phone, session) {
+  try {
+    await kv.put(
+      `session_${phone}`,
+      JSON.stringify(session),
+      { expirationTtl: 86400 } // 24 hours
+    );
+  } catch (error) {
+    console.error("Session save error:", error);
+  }
+}
+
 // =============================================
-// CONTEXT-AWARE AI RESPONSE
+// IMPROVED LANGUAGE DETECTION
 // =============================================
 
-async function getContextAwareAIResponse(env, context) {
-  const { userMessage, userName, userPhone, session, preferredLanguage, conversationHistory } = context;
+function detectLanguage(text, session) {
+  // If user has set preference, use it
+  if (session?.language === 'hi') return 'hi';
+  if (session?.language === 'en') return 'en';
   
-  // Prepare conversation history for AI
-  const historyText = conversationHistory
-    .map(msg => `${msg.role}: ${msg.content}`)
-    .join('\n');
+  // Detect from text
+  const lowerText = text.toLowerCase();
   
-  const systemPrompt = preferredLanguage === 'hi' ? `
-# भूमिका: RPL Hospital AI रिसेप्शनिस्ट
-आप एक AI receptionist हैं जो RPL Hospital के लिए काम करती हैं।
+  // Hindi patterns
+  const hindiPatterns = [
+    /[\u0900-\u097F]/, // Hindi characters
+    /\b(नमस्ते|हैलो|हां|नहीं|कैसे|क्या|में|हूं|है|हैं|बोलो|हिंदी|कृपया|धन्यवाद|जी)\b/,
+    /hindi\s+bolo/i,
+    /हिंदी\s+बोलो/i
+  ];
+  
+  // If any Hindi pattern matches
+  for (const pattern of hindiPatterns) {
+    if (pattern.test(text)) return 'hi';
+  }
+  
+  // English patterns
+  const englishPatterns = [
+    /\b(hi|hello|hey|good|morning|afternoon|evening|appointment|doctor|test)\b/i,
+    /^[a-zA-Z\s,.!?]+$/ // Only English characters
+  ];
+  
+  for (const pattern of englishPatterns) {
+    if (pattern.test(lowerText)) return 'en';
+  }
+  
+  // Default to Hindi for Indian numbers
+  return 'hi';
+}
 
-# महत्वपूर्ण जानकारी:
-- अस्पताल: RPL Hospital
+// =============================================
+// AI RESPONSE GENERATOR
+// =============================================
+
+async function getAIResponse(env, message, lang) {
+  const systemPrompt = lang === 'hi' ? `
+आप RPL Hospital के AI receptionist हैं।
+हमेशा विनम्र और helpful रहें।
+कीमतों का जिक्र न करें।
+आपात स्थिति में तुरंत मदद करें।
+
+अस्पताल जानकारी:
+- नाम: RPL Hospital
 - फोन: ${env.HOSPITAL_PHONE}
 - पता: ${env.HOSPITAL_ADDRESS}
 
-# डॉक्टर:
-1. डॉ. अखिलेश कुमार - फिजिशियन और शुगर विशेषज्ञ
+डॉक्टर:
+1. डॉ. अखिलेश कुमार - फिजिशियन और शुगर
 2. डॉ. अंकित शुक्ला - न्यूरोलॉजिस्ट
 3. डॉ. ए.के. सिंह - ENT
 4. डॉ. आनंद मिश्रा - डेंटल
 
-# निर्देश:
-1. हमेशा विनम्र और मददगार रहें
-2. कीमतों का जिक्र न करें
-3. आपात स्थिति में तुरंत गाइड करें
-4. प्राकृतिक हिंदी में बात करें
-5. पिछली conversation को याद रखें
+टेस्ट: CBC, Blood Sugar, Thyroid, LFT, KFT, Lipid, Urine
 
-# Conversation History:
-${historyText}
+मरीज का मैसेज: "${message}"
 
-# Patient:
-नाम: ${userName}
-फोन: ${userPhone}
+उचित जवाब दें:` : `
+You are RPL Hospital's AI receptionist.
+Always be polite and helpful.
+Never mention prices.
+Help immediately in emergencies.
 
-# Current Message:
-मरीज: "${userMessage}"
-
-अब उचित जवाब दें:` : `
-# ROLE: RPL Hospital AI Receptionist
-You are an AI receptionist working for RPL Hospital.
-
-# IMPORTANT INFORMATION:
-- Hospital: RPL Hospital
+Hospital Info:
+- Name: RPL Hospital
 - Phone: ${env.HOSPITAL_PHONE}
 - Address: ${env.HOSPITAL_ADDRESS}
 
-# DOCTORS:
-1. Dr. Akhilesh Kumar - Physician & Diabetes Specialist
+Doctors:
+1. Dr. Akhilesh Kumar - Physician & Diabetes
 2. Dr. Ankit Shukla - Neurologist
-3. Dr. A.K. Singh - ENT Specialist
-4. Dr. Anand Mishra - Dental Specialist
+3. Dr. A.K. Singh - ENT
+4. Dr. Anand Mishra - Dental
 
-# INSTRUCTIONS:
-1. Always be polite and helpful
-2. Never mention prices
-3. Guide immediately in emergencies
-4. Use natural conversation style
-5. Remember conversation history
+Tests: CBC, Blood Sugar, Thyroid, LFT, KFT, Lipid, Urine
 
-# Conversation History:
-${historyText}
+Patient message: "${message}"
 
-# Patient:
-Name: ${userName}
-Phone: ${userPhone}
-
-# Current Message:
-Patient: "${userMessage}"
-
-Now provide an appropriate response:`;
+Provide appropriate response:`;
 
   try {
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -299,10 +276,10 @@ Now provide an appropriate response:`;
         model: "llama-3.1-8b-instant",
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage }
+          { role: "user", content: message }
         ],
-        temperature: 0.7,
-        max_tokens: 200
+        temperature: 0.5,
+        max_tokens: 150
       })
     });
 
@@ -311,63 +288,64 @@ Now provide an appropriate response:`;
     }
 
     const data = await response.json();
-    let reply = data.choices[0].message.content.trim();
-    
-    // Ensure response is in correct language
-    if (preferredLanguage === 'hi') {
-      // Check if AI replied in English when Hindi was requested
-      const hindiChars = /[\u0900-\u097F]/;
-      if (!hindiChars.test(reply)) {
-        reply = "माफ़ करें, हिंदी में जवाब देने में समस्या हो रही है। कृपया अपनी बात दोबारा बताएं।";
-      }
-    }
-    
-    return reply;
+    return data.choices[0].message.content.trim();
     
   } catch (error) {
-    console.error("AI response error:", error);
-    
-    // Fallback responses
-    if (preferredLanguage === 'hi') {
-      return "नमस्ते! मैं RPL Hospital का AI रिसेप्शनिस्ट हूं। आप कैसे मदद चाहते हैं? क्या आप डॉक्टर से मिलना चाहते हैं या कोई टेस्ट कराना चाहते हैं?";
-    } else {
-      return "Hello! I'm RPL Hospital AI receptionist. How can I help you today? Are you looking to see a doctor or get a test done?";
-    }
+    console.error("AI error:", error);
+    return lang === 'hi' 
+      ? "माफ़ करें, तकनीकी समस्या आ रही है। कृपया फिर से बताएं।"
+      : "Sorry, technical issue. Please repeat your message.";
   }
 }
 
 // =============================================
-// UTILITY FUNCTIONS
+// UTILITY FUNCTIONS (ERROR HANDLED)
 // =============================================
 
-async function sendWhatsApp(env, to, text, referenceId) {
+async function sendWhatsApp(env, to, text) {
   try {
-    await fetch(`https://graph.facebook.com/v20.0/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: to,
-        type: "text",
-        text: { body: text },
-        context: referenceId ? { message_id: referenceId } : undefined
-      })
-    });
+    const response = await fetch(
+      `https://graph.facebook.com/v20.0/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: to,
+          type: "text",
+          text: { body: text }
+        })
+      }
+    );
+    
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("WhatsApp API error:", error);
+    }
+    
   } catch (error) {
     console.error("Send WhatsApp error:", error);
   }
 }
 
-async function logMessage(db, phone, direction, content) {
+async function logInteraction(db, data) {
   try {
+    // Log incoming
     await db.prepare(
-      `INSERT INTO message_logs (phone_number, direction, message_type, message_content, timestamp)
-       VALUES (?, ?, 'text', ?, CURRENT_TIMESTAMP)`
-    ).bind(phone, direction, content.substring(0, 500)).run();
+      `INSERT INTO message_logs (phone_number, direction, message_content, timestamp)
+       VALUES (?, 'incoming', ?, CURRENT_TIMESTAMP)`
+    ).bind(data.phone, data.incoming.substring(0, 500)).run();
+    
+    // Log outgoing
+    await db.prepare(
+      `INSERT INTO message_logs (phone_number, direction, message_content, timestamp)
+       VALUES (?, 'outgoing', ?, CURRENT_TIMESTAMP)`
+    ).bind(data.phone, data.outgoing.substring(0, 500)).run();
+    
   } catch (error) {
     console.error("Log error:", error);
   }
@@ -382,5 +360,6 @@ function verifyWebhook(request, env) {
   if (mode === "subscribe" && token === env.WHATSAPP_VERIFY_TOKEN) {
     return new Response(challenge, { status: 200 });
   }
+  
   return new Response("Forbidden", { status: 403 });
 }
