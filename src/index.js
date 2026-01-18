@@ -169,33 +169,6 @@ function mainMenu(env, name) {
 Reply with number.`;
 }
 
-// ---------------------------------------------
-// MAIN ROUTER (Single Entry – no duplicate)
-// ---------------------------------------------
-async function mainRouter(env, msg, name, session) {
-  const text = msg.text?.body?.toLowerCase().trim() || "";
-
-  if (!text || ["hi", "hello", "start", "menu"].includes(text)) {
-    session.state = "menu";
-    return mainMenu(env, name);
-  }
-
-  // आगे का पूरा OPD, Slot, Token, AI, Emergency logic
-  // PART 2 और PART 3 में इसी router में add होगा
-
-  return `आपका संदेश मिला।
-Your message is received.
-
-Type MENU to continue.
-📞 ${env.HOSPITAL_PHONE}`;
-}
-
-// ---------------------------------------------
-// Cron Placeholders (Logic in PART 3)
-// ---------------------------------------------
-async function sendAppointmentReminders(env) {}
-async function sendDailyAdminReport(env) {}
-async function sendMedicineReminders(env) {}
 
 // =============================================
 // PART 2 / 3  (OPD, SLOT, TOKEN, BOOKING LOGIC)
