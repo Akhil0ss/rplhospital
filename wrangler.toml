@@ -44,11 +44,3 @@ crons = [
     "0 21 * * *",  # Daily summary at 9 PM IST
     "0 * * * *"    # Medicine reminders every hour
 ]
-
-# Production environment
-[env.production]
-vars = { ENVIRONMENT = "production" }
-
-# Development environment  
-[env.dev]
-vars = { ENVIRONMENT = "development" }
