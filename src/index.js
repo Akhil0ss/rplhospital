@@ -1,7 +1,4 @@
-/**
- * RPL Hospital WhatsApp Bot - FIXED VERSION
- * All OG services + features preserved
- */
+// src/index.js - BUILD FIXED VERSION
 import { WhatsAppAPI } from './services/whatsapp.js';
 import { MessageProcessor } from './services/message-processor.js';
 import { SessionManager } from './services/session.js';
@@ -10,22 +7,19 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    // ✅ 1. Webhook verification (OG same)
     if (request.method === 'GET' && url.pathname === '/webhook') {
       return verifyWebhook(request, env);
     }
 
-    // 🔥 2. Webhook messages - FIXED ORDER
     if (request.method === 'POST' && url.pathname === '/webhook') {
-      await handleWebhook(request, env);  // Process FIRST
-      return new Response('OK', { status: 200 });  // Reply LAST ✅
+      await handleWebhook(request, env);
+      return new Response('OK', { status: 200 });
     }
 
     return new Response('Not found', { status: 404 });
   }
 };
 
-// ✅ OG FUNCTIONS - JUST ERROR HANDLING FIXED
 function verifyWebhook(request, env) {
   const url = new URL(request.url);
   const mode = url.searchParams.get('hub.mode');
@@ -52,7 +46,6 @@ async function handleWebhook(request, env) {
     const messages = value.messages;
     const contacts = value.contacts || [];
 
-    // 🔥 ALL OG SERVICES - SAFE INITIALIZATION
     let whatsapp, sessionManager, processor;
     
     try {
@@ -61,7 +54,6 @@ async function handleWebhook(request, env) {
       processor = new MessageProcessor(env, whatsapp, sessionManager);
     } catch (initError) {
       console.error('❌ Service init failed:', initError);
-      // Emergency fallback reply
       for (const message of messages) {
         await sendEmergencyReply(env, message.from, "✅ RPL Hospital Bot!
 Type MENU");
@@ -69,7 +61,6 @@ Type MENU");
       return;
     }
 
-    // 🔥 PROCESS ALL MESSAGES (OG logic)
     for (const message of messages) {
       try {
         const phoneNumber = message.from;
@@ -78,19 +69,16 @@ Type MENU");
 
         console.log(`🤖 Processing: ${phoneNumber}`);
 
-        // All OG features
         await logMessage(env.DB, phoneNumber, 'incoming', message);
         await whatsapp.markAsRead(message.id);
         await processor.processMessage(message, phoneNumber, senderName);
 
       } catch (msgError) {
         console.error(`❌ Msg error ${message.from}:`, msgError);
-        // Safe fallback per message
         await sendEmergencyReply(env, message.from, "❌ Try 'menu'");
       }
     }
 
-    // OG Status handling
     if (value.statuses) {
       for (const status of value.statuses) {
         await updateMessageStatus(env.DB, status).catch(console.error);
@@ -102,7 +90,6 @@ Type MENU");
   }
 }
 
-// 🔥 EMERGENCY FALLBACK (if services crash)
 async function sendEmergencyReply(env, phoneNumber, message) {
   try {
     const payload = {
@@ -125,7 +112,6 @@ async function sendEmergencyReply(env, phoneNumber, message) {
   }
 }
 
-// OG DB functions (unchanged)
 async function logMessage(db, phoneNumber, direction, message) {
   try {
     const messageType = message.type || 'text';
