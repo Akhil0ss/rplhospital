@@ -399,8 +399,8 @@ Time: ${session.lab.time}`);
     session.date = userText;
     session.step = "opd_slot";
 
-    const slots = generateSlots().join("
-");
+    const slots = generateSlots().join("\
+  ");
     return lang === "hi"
       ? `ठीक है, ${userText} को OPD 2 से 6 बजे तक है। उपलब्ध समय:
 ${slots}
