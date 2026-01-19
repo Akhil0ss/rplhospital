@@ -1,0 +1,14 @@
+{
+    "name": "rplhospital",
+    "version": "4.1.0",
+    "description": "RPL Hospital WhatsApp AI Receptionist",
+    "main": "src/index.js",
+    "scripts": {
+        "deploy": "wrangler deploy",
+        "dev": "wrangler dev"
+    },
+    "dependencies": {},
+    "devDependencies": {
+        "wrangler": "^3.114.0"
+    }
+}
