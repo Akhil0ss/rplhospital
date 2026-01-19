@@ -1,7 +1,7 @@
 /**
- * RPL HOSPITAL - CONVERSATIONAL AI v6.0 FINAL
- * ============================================
- * Natural conversation with doctor timing validation
+ * RPL HOSPITAL - FINAL PERFECT v7.0
+ * ==================================
+ * Stateful conversation with proper flow management
  */
 
 export default {
@@ -10,7 +10,7 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
-      return new Response(JSON.stringify({ status: "active", version: "6.0" }), {
+      return new Response(JSON.stringify({ status: "active", version: "7.0" }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
       });
@@ -47,44 +47,11 @@ export default {
   }
 };
 
-// Doctor schedules with timing validation
 const DOCTORS = {
-  'akhilesh': {
-    name: 'डॉ. अखिलेश कुमार कसौधन',
-    specialty: 'शुगर व सामान्य रोग',
-    dept: 'General',
-    days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
-    startTime: '14:00', // 2 PM
-    endTime: '19:00',   // 7 PM
-    keywords: ['akhilesh', 'अखिलेश', 'sugar', 'शुगर', 'diabetes', 'general', 'सामान्य']
-  },
-  'ankit': {
-    name: 'डॉ. अंकित शुक्ला',
-    specialty: 'दिमाग व नस रोग',
-    dept: 'Neurology',
-    days: [15], // Only 15th of month
-    startTime: '14:00',
-    endTime: '19:00',
-    keywords: ['ankit', 'अंकित', 'neuro', 'brain', 'दिमाग', 'सिर', 'नस']
-  },
-  'singh': {
-    name: 'डॉ. ए.के. सिंह',
-    specialty: 'नाक, कान, गला',
-    dept: 'ENT',
-    days: ['monday'],
-    startTime: '15:00', // 3 PM
-    endTime: '18:00',   // 6 PM
-    keywords: ['singh', 'सिंह', 'ent', 'nose', 'ear', 'throat', 'नाक', 'कान', 'गला']
-  },
-  'anand': {
-    name: 'डॉ. आनन्द मिश्रा',
-    specialty: 'दांत',
-    dept: 'Dental',
-    days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'],
-    startTime: '15:00',
-    endTime: '18:00',
-    keywords: ['anand', 'आनन्द', 'mishra', 'dental', 'tooth', 'teeth', 'दांत']
-  }
+  'akhilesh': { name: 'डॉ. अखिलेश कुमार कसौधन', specialty: 'शुगर व सामान्य रोग', dept: 'General', days: 'all', start: 14, end: 19 },
+  'ankit': { name: 'डॉ. अंकित शुक्ला', specialty: 'दिमाग व नस रोग', dept: 'Neurology', days: [15], start: 14, end: 19 },
+  'singh': { name: 'डॉ. ए.के. सिंह', specialty: 'नाक, कान, गला', dept: 'ENT', days: [1], start: 15, end: 18 },
+  'anand': { name: 'डॉ. आनन्द मिश्रा', specialty: 'दांत', dept: 'Dental', days: 'all', start: 15, end: 18 }
 };
 
 async function processMessages(messages, contacts, env) {
@@ -100,20 +67,25 @@ async function processMessages(messages, contacts, env) {
       await markAsRead(env, msgId);
       await logMessage(env.DB, from, "incoming", text, msgId);
 
+      // Get state
+      const state = await getState(env.SESSIONS, from);
+
       // Emergency check
       if (isEmergency(text)) {
         await handleEmergency(env, from, name, text);
+        await clearState(env.SESSIONS, from);
         continue;
       }
 
-      // AI-powered conversational response
-      const response = await getAIResponse(env, from, name, text);
+      // Process conversation
+      const result = await processConversation(env, from, name, text, state);
 
-      await sendMessage(env, from, response.message);
-      await logMessage(env.DB, from, "outgoing", response.message, `resp_${Date.now()}`);
+      await sendMessage(env, from, result.reply);
+      await logMessage(env.DB, from, "outgoing", result.reply, `resp_${Date.now()}`);
+      await setState(env.SESSIONS, from, result.newState);
 
-      if (response.notify) {
-        await notifyStaff(env, response.notify);
+      if (result.notify) {
+        await notifyStaff(env, result.notify);
       }
 
     } catch (error) {
@@ -123,166 +95,173 @@ async function processMessages(messages, contacts, env) {
   }
 }
 
-async function getAIResponse(env, phone, name, text) {
-  const history = await getRecentHistory(env.DB, phone);
+async function processConversation(env, phone, name, text, state) {
+  const lower = text.toLowerCase();
 
-  const systemPrompt = `You are RPL Hospital's friendly AI receptionist. Have natural conversations in Hindi.
-
-HOSPITAL INFO:
-- Location: Baidaula Chauraha, Dumariyaganj
-- Phone: ${env.HOSPITAL_PHONE}
-
-DOCTORS & SCHEDULES:
-1. डॉ. अखिलेश कुमार कसौधन - शुगर व सामान्य रोग (रोज सुबह 2-शाम 7)
-2. डॉ. अंकित शुक्ला - दिमाग व नस रोग (महीने की 15 तारीख, दोपहर 2-शाम 7)
-3. डॉ. ए.के. सिंह - नाक, कान, गला (सोमवार, दोपहर 3-शाम 6)
-4. डॉ. आनन्द मिश्रा - दांत (रोज, दोपहर 3-शाम 6)
-
-CONVERSATION STYLE:
-- Be friendly and helpful like a human receptionist
-- Ask ONE question at a time
-- Keep responses SHORT (2-3 lines)
-- Use emojis sparingly
-- If user wants appointment, collect: problem, doctor preference, date, time
-- Validate doctor availability based on day/time
-- If doctor not available, suggest alternative
-
-PATIENT HISTORY:
-${history}
-
-RESPONSE FORMAT (JSON):
-{
-  "message": "Your natural Hindi response",
-  "intent": "greeting|appointment|query|booking",
-  "extractedInfo": {
-    "problem": "...",
-    "doctor": "akhilesh|ankit|singh|anand",
-    "date": "YYYY-MM-DD",
-    "time": "HH:MM"
-  },
-  "needsBooking": true/false,
-  "staffNote": "..."
-}
-
-USER: "${text}"`;
-
-  try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${env.GROQ_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [{ role: "user", content: systemPrompt }],
-        temperature: 0.6,
-        max_tokens: 400,
-        response_format: { type: "json_object" }
-      })
-    });
-
-    const data = await response.json();
-    const aiResponse = JSON.parse(data.choices[0].message.content);
-
-    // If booking needed, validate and book
-    if (aiResponse.needsBooking && aiResponse.extractedInfo) {
-      const bookingResult = await validateAndBook(env, phone, name, aiResponse.extractedInfo);
-      return bookingResult;
-    }
-
-    return { message: aiResponse.message };
-
-  } catch (e) {
-    console.error("AI Error:", e);
-    return { message: "नमस्ते! मैं आपकी कैसे मदद कर सकता हूँ? 🏥" };
-  }
-}
-
-async function validateAndBook(env, phone, patientName, info) {
-  const doctor = DOCTORS[info.doctor];
-  if (!doctor) {
-    return { message: "कृपया सही डॉक्टर चुनें।" };
-  }
-
-  // Parse date
-  const appointmentDate = new Date(info.date);
-  const dayName = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][appointmentDate.getDay()];
-  const dateNum = appointmentDate.getDate();
-
-  // Check doctor availability
-  let available = false;
-  if (Array.isArray(doctor.days)) {
-    if (typeof doctor.days[0] === 'number') {
-      available = doctor.days.includes(dateNum);
-    } else {
-      available = doctor.days.includes(dayName);
-    }
-  }
-
-  if (!available) {
-    let availMsg = '';
-    if (doctor.name.includes('अंकित')) {
-      availMsg = `${doctor.name} सिर्फ महीने की 15 तारीख को उपलब्ध हैं।`;
-    } else if (doctor.name.includes('सिंह')) {
-      availMsg = `${doctor.name} सिर्फ सोमवार को उपलब्ध हैं।`;
-    }
-    return { message: `${availMsg}\n\nकोई और तारीख चुनें या दूसरे डॉक्टर से मिलें।` };
-  }
-
-  // Validate time
-  const [reqHour, reqMin] = info.time.split(':').map(Number);
-  const [startHour] = doctor.startTime.split(':').map(Number);
-  const [endHour] = doctor.endTime.split(':').map(Number);
-
-  if (reqHour < startHour || reqHour >= endHour) {
+  // STEP 1: Initial greeting
+  if (!state.step || state.step === 'start') {
     return {
-      message: `${doctor.name} ${formatTime(doctor.startTime)} से ${formatTime(doctor.endTime)} तक उपलब्ध हैं।\n\nकृपया इस समय के बीच का समय चुनें।`
+      reply: `नमस्ते ${name}! मैं आपकी कैसे मदद कर सकता हूँ? 🏥\n\nअपॉइंटमेंट के लिए "appointment" या "डॉक्टर" लिखें।`,
+      newState: { step: 'waiting_intent', name }
     };
   }
 
-  // Book appointment
-  const token = Math.floor(1000 + Math.random() * 9000);
-
-  try {
-    await env.DB.prepare(
-      `INSERT INTO appointments (phone_number, patient_name, doctor_name, department, appointment_date, appointment_time, token_number, status, created_at) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', CURRENT_TIMESTAMP)`
-    ).bind(phone, patientName, doctor.name, doctor.dept, info.date, info.time, token).run();
-  } catch (e) {
-    console.error("DB Error:", e);
+  // STEP 2: Understand intent
+  if (state.step === 'waiting_intent') {
+    if (lower.includes('appointment') || lower.includes('doctor') || lower.includes('डॉक्टर') || lower.includes('मिलना')) {
+      return {
+        reply: `बिल्कुल! आपकी क्या समस्या है? कृपया बताएं।`,
+        newState: { ...state, step: 'get_problem', intent: 'appointment' }
+      };
+    }
+    return {
+      reply: `मैं अपॉइंटमेंट बुक करने में मदद कर सकता हूँ। क्या आप डॉक्टर से मिलना चाहते हैं?`,
+      newState: state
+    };
   }
 
-  const confirmMsg = `✅ *अपॉइंटमेंट बुक हो गई!*\n\n👤 ${patientName}\n🏥 ${doctor.name}\n📅 ${formatDate(appointmentDate)}\n⏰ ${formatTime(info.time)}\n🎫 टोकन: *${token}*\n\nसमय पर पहुंचें। धन्यवाद! 🙏`;
+  // STEP 3: Get problem
+  if (state.step === 'get_problem') {
+    const suggestedDoc = suggestDoctor(text);
+    const docList = `\n\n📋 हमारे डॉक्टर्स:\n1. डॉ. अखिलेश - शुगर व सामान्य रोग\n2. डॉ. अंकित - दिमाग व नस रोग\n3. डॉ. ए.के. सिंह - नाक, कान, गला\n4. डॉ. आनन्द - दांत`;
 
+    let reply = `समझ गया।`;
+    if (suggestedDoc) {
+      reply += `\n\n💡 ${suggestedDoc} से मिलना बेहतर रहेगा।`;
+    }
+    reply += `${docList}\n\nकिस डॉक्टर से मिलना चाहेंगे? (1-4 लिखें)`;
+
+    return {
+      reply,
+      newState: { ...state, step: 'select_doctor', problem: text }
+    };
+  }
+
+  // STEP 4: Select doctor
+  if (state.step === 'select_doctor') {
+    const docKey = parseDoctor(text);
+    const doctor = DOCTORS[docKey];
+
+    return {
+      reply: `ठीक है! ${doctor.name} (${doctor.specialty}) से मिलेंगे।\n\nकब आना चाहेंगे? "आज", "कल" या तारीख बताएं।`,
+      newState: { ...state, step: 'select_date', doctor: docKey }
+    };
+  }
+
+  // STEP 5: Select date
+  if (state.step === 'select_date') {
+    const date = parseDate(text);
+    const doctor = DOCTORS[state.doctor];
+
+    // Validate day
+    if (!isDoctorAvailable(doctor, date)) {
+      let msg = `${doctor.name} `;
+      if (doctor.days[0] === 15) {
+        msg += `सिर्फ महीने की 15 तारीख को उपलब्ध हैं।`;
+      } else if (doctor.days[0] === 1) {
+        msg += `सिर्फ सोमवार को उपलब्ध हैं।`;
+      }
+      msg += `\n\nकोई और तारीख चुनें।`;
+      return { reply: msg, newState: state };
+    }
+
+    const slots = generateSlots(doctor.start, doctor.end);
+    return {
+      reply: `तारीख: ${formatDate(date)}\n\n⏰ समय चुनें:\n${slots.slice(0, 10).map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nकौन सा समय? (1-10)`,
+      newState: { ...state, step: 'select_time', date: date.toISOString().split('T')[0], slots }
+    };
+  }
+
+  // STEP 6: Book appointment
+  if (state.step === 'select_time') {
+    const slotIdx = parseInt(text.match(/\d+/)?.[0] || '1') - 1;
+    const time = state.slots[slotIdx] || state.slots[0];
+    const token = Math.floor(1000 + Math.random() * 9000);
+    const doctor = DOCTORS[state.doctor];
+
+    // Save to DB
+    try {
+      await env.DB.prepare(
+        `INSERT INTO appointments (phone_number, patient_name, doctor_name, department, appointment_date, appointment_time, token_number, status, created_at) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', CURRENT_TIMESTAMP)`
+      ).bind(phone, name, doctor.name, doctor.dept, state.date, time, token).run();
+    } catch (e) {
+      console.error("DB Error:", e);
+    }
+
+    const reply = `✅ *अपॉइंटमेंट बुक हो गई!*\n\n👤 ${name}\n🏥 ${doctor.name}\n📅 ${state.date}\n⏰ ${time}\n🎫 टोकन: *${token}*\n\nसमय पर पहुंचें। धन्यवाद! 🙏`;
+
+    return {
+      reply,
+      newState: { step: 'start', name },
+      notify: `📅 नई बुकिंग\n\nमरीज: ${name}\nडॉक्टर: ${doctor.name}\nतारीख: ${state.date}\nसमय: ${time}\nटोकन: ${token}\nसमस्या: ${state.problem}`
+    };
+  }
+
+  // Fallback
   return {
-    message: confirmMsg,
-    notify: `📅 नई बुकिंग\n\nमरीज: ${patientName}\nडॉक्टर: ${doctor.name}\nतारीख: ${info.date}\nसमय: ${info.time}\nटोकन: ${token}`
+    reply: `माफ़ करें, समझ नहीं आया। "appointment" लिखें नई बुकिंग के लिए।`,
+    newState: { step: 'start', name }
   };
 }
 
-function formatTime(time24) {
-  const [hour, min] = time24.split(':').map(Number);
-  const period = hour >= 12 ? 'PM' : 'AM';
-  const hour12 = hour > 12 ? hour - 12 : hour;
-  return `${hour12}:${min.toString().padStart(2, '0')} ${period}`;
+function suggestDoctor(problem) {
+  const p = problem.toLowerCase();
+  if (p.includes('sugar') || p.includes('शुगर') || p.includes('diabetes')) return 'डॉ. अखिलेश';
+  if (p.includes('sir') || p.includes('सिर') || p.includes('dimag') || p.includes('दिमाग')) return 'डॉ. अंकित';
+  if (p.includes('nose') || p.includes('ear') || p.includes('नाक') || p.includes('कान')) return 'डॉ. ए.के. सिंह';
+  if (p.includes('tooth') || p.includes('दांत')) return 'डॉ. आनन्द';
+  return null;
+}
+
+function parseDoctor(text) {
+  const lower = text.toLowerCase();
+  if (lower.includes('1') || lower.includes('akhilesh') || lower.includes('अखिलेश')) return 'akhilesh';
+  if (lower.includes('2') || lower.includes('ankit') || lower.includes('अंकित')) return 'ankit';
+  if (lower.includes('3') || lower.includes('singh') || lower.includes('सिंह')) return 'singh';
+  if (lower.includes('4') || lower.includes('anand') || lower.includes('आनन्द')) return 'anand';
+  return 'akhilesh';
+}
+
+function parseDate(text) {
+  const lower = text.toLowerCase();
+  if (lower.includes('आज') || lower.includes('aaj') || lower.includes('today')) {
+    return new Date();
+  }
+  if (lower.includes('कल') || lower.includes('kal') || lower.includes('tomorrow')) {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return tomorrow;
+  }
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return tomorrow;
+}
+
+function isDoctorAvailable(doctor, date) {
+  if (doctor.days === 'all') return true;
+  if (Array.isArray(doctor.days)) {
+    if (doctor.days[0] === 15) return date.getDate() === 15;
+    if (doctor.days[0] === 1) return date.getDay() === 1; // Monday
+  }
+  return true;
+}
+
+function generateSlots(startHour, endHour) {
+  const slots = [];
+  for (let h = startHour; h < endHour; h++) {
+    for (let m = 0; m < 60; m += 10) {
+      const period = h >= 12 ? 'PM' : 'AM';
+      const displayHour = h > 12 ? h - 12 : h;
+      slots.push(`${displayHour}:${m.toString().padStart(2, '0')} ${period}`);
+    }
+  }
+  return slots;
 }
 
 function formatDate(date) {
   const months = ['जनवरी', 'फरवरी', 'मार्च', 'अप्रैल', 'मई', 'जून', 'जुलाई', 'अगस्त', 'सितंबर', 'अक्टूबर', 'नवंबर', 'दिसंबर'];
   return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
-}
-
-async function getRecentHistory(db, phone) {
-  try {
-    const logs = await db.prepare(
-      `SELECT message_content, direction FROM message_logs WHERE phone_number = ? ORDER BY timestamp DESC LIMIT 5`
-    ).bind(phone).all();
-
-    return logs.results.map(l => `${l.direction}: ${l.message_content}`).join('\n');
-  } catch (e) {
-    return "No history";
-  }
 }
 
 function isEmergency(text) {
@@ -294,6 +273,26 @@ async function handleEmergency(env, from, name, text) {
   const alert = `🚨 *आपातकालीन सूचना* 🚨\n\nतुरंत अस्पताल आएं या फोन करें:\n*${env.HOSPITAL_PHONE}*\n\n📍 बैदौला चौराहा, बंसी रोड, डुमरियागंज`;
   await sendMessage(env, from, alert);
   await notifyStaff(env, `🚨 EMERGENCY: ${name} (${from}) - ${text}`);
+}
+
+async function getState(kv, phone) {
+  try {
+    const val = await kv.get(`state_${phone}`);
+    if (val) {
+      const state = JSON.parse(val);
+      if (Date.now() - state.timestamp < 600000) return state; // 10 min
+    }
+  } catch (e) { }
+  return { step: 'start' };
+}
+
+async function setState(kv, phone, state) {
+  state.timestamp = Date.now();
+  await kv.put(`state_${phone}`, JSON.stringify(state), { expirationTtl: 3600 });
+}
+
+async function clearState(kv, phone) {
+  await kv.delete(`state_${phone}`);
 }
 
 async function markAsRead(env, messageId) {
