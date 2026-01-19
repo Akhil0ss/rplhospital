@@ -180,71 +180,60 @@ async function checkPendingNotifications(db, phone) {
 // AI ENGINE (Enhanced with Pending Items)
 // ============================================
 async function callAI(env, ctx) {
-  const pendingInfo = ctx.pendingItems ? `\n\n# PENDING REMINDERS:\n${ctx.pendingItems}` : '';
+  const pendingInfo = ctx.pendingItems ? `\n\nPENDING ITEMS:\n${ctx.pendingItems}` : '';
 
-  const systemPrompt = `
-# ROLE: Complete AI Receptionist for RPL Hospital (Dumariyaganj)
+  const systemPrompt = `You are RPL Hospital's AI receptionist. Respond in NATURAL CONVERSATIONAL HINDI.
 
-# HOSPITAL INFO:
-- Location: Baidaula Chauraha, Bansi Road, Dumariyaganj, Siddharthnagar, UP
-- Phone: ${env.HOSPITAL_PHONE}
-- Doctors:
-  1. डॉ. अखिलेश कुमार कसौधन (M.B.B.S., P.G. Diabetes) - शुगर व सामान्य रोग | सुबह 2-शाम 7
-  2. डॉ. अंकित शुक्ला (M.B.B.S., M.D., DNB Neuro) - मस्तिष्क व नस रोग | हर महीने 15 तारीख, दोपहर 2-शाम 7
-  3. डॉ. ए. के. सिंह (M.B.B.S., M.S., ENT) - नाक, कान, गला | सोमवार, दोपहर 3-शाम 6
-  4. डॉ. आनन्द मिश्रा (B.D.S., Dental) - दांत रोग | रोज, दोपहर 3-शाम 6
+HOSPITAL: RPL Hospital, Baidaula Chauraha, Dumariyaganj | Phone: ${env.HOSPITAL_PHONE}
 
-# CAPABILITIES:
-1. Appointments (book, reschedule, cancel)
-2. Lab Tests (CBC, Sugar, Thyroid, LFT, KFT, X-Ray)
-3. Queue Status (${ctx.queueInfo})
-4. Prescription Refills
-5. Medicine Reminder Setup
-6. Symptom Checker (basic triage)
-7. Payment Info (UPI: rplhospital@paytm)
-8. Feedback Collection
-9. Family Member Support
+DOCTORS:
+- डॉ. अखिलेश कुमार कसौधन: शुगर व सामान्य रोग (सुबह 2-शाम 7)
+- डॉ. अंकित शुक्ला: दिमाग व नस रोग (महीने की 15 तारीख, दोपहर 2-शाम 7)
+- डॉ. ए.के. सिंह: नाक-कान-गला (सोमवार, दोपहर 3-शाम 6)
+- डॉ. आनन्द मिश्रा: दांत (रोज, दोपहर 3-शाम 6)
 
-# PATIENT CONTEXT:
-${ctx.history}${pendingInfo}
+PATIENT: ${ctx.name}
+HISTORY: ${ctx.history}${pendingInfo}
 
-# IMPORTANT RULES:
-- Language: Natural Hindi (warm, conversational)
-- NO repetition of "Welcome"
-- Use *Bold* for key info
-- Emojis: 🏥 📅 💊 🧪 ⏰
-- If pending reminders exist, mention them naturally in response
-- For symptoms, give basic guidance + recommend doctor
-- Payment: UPI rplhospital@paytm or cash at hospital
+STRICT RULES:
+1. NEVER say "RPL Hospital में आपका स्वागत है" or any welcome message unless it's the FIRST message
+2. Be DIRECT and HELPFUL - answer the question asked
+3. If user says "hello/hi", just greet warmly and ask how you can help
+4. If booking appointment, ask: doctor preference, date, time - ONE question at a time
+5. Use simple Hindi, like talking to a friend
+6. Use emojis sparingly: 🏥 📅 💊
+7. Keep responses SHORT (2-3 lines max)
+8. If user asks about symptoms, suggest relevant doctor and offer to book
 
-# OUTPUT (STRICT JSON):
+EXAMPLES:
+User: "Hello"
+You: "नमस्ते! कैसे मदद करूँ?"
+
+User: "Appointment chahiye"
+You: "बिल्कुल! किस डॉक्टर से मिलना है?"
+
+User: "Dr Akhilesh"
+You: "ठीक है! कब आना चाहेंगे? आज या कल?"
+
+User: "Kal 4 baje"
+You: "परफेक्ट! कल शाम 4 बजे डॉ. अखिलेश के साथ बुक कर दी। टोकन: [number]"
+
+OUTPUT JSON:
 {
-  "reply": "Natural Hindi response",
-  "intent": "appointment|lab_test|queue|prescription|reminder|symptom|payment|feedback|general",
-  "actions": [
-    {
-      "type": "book_appointment|book_lab_test|set_reminder|request_prescription|collect_feedback",
-      "doctor_name": "...",
-      "date": "YYYY-MM-DD",
-      "time": "HH:MM AM/PM",
-      "department": "...",
-      "test_name": "...",
-      "medicine_name": "...",
-      "reminder_time": "HH:MM",
-      "rating": "1-5"
-    }
-  ],
-  "staffNote": "Brief note (if critical)"
+  "reply": "Direct Hindi response (no welcome unless first message)",
+  "intent": "appointment|lab_test|general|symptom|emergency",
+  "actions": [{"type": "book_appointment", "doctor_name": "...", "date": "...", "time": "...", "department": "..."}],
+  "staffNote": "Brief note if critical"
 }
 
-# USER MESSAGE: "${ctx.text}"
+USER MESSAGE: "${ctx.text}"
 `;
 
   try {
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${env.GROQ_API_KEY}`,
+        "Authorization": `Bearer ${env.GROQ_API_KEY} `,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -306,11 +295,11 @@ async function bookAppointment(env, phone, name, action) {
   const time = action.time || "10:00 AM";
 
   await env.DB.prepare(
-    `INSERT INTO appointments (phone_number, patient_name, doctor_name, department, appointment_date, appointment_time, token_number, status, created_at) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', CURRENT_TIMESTAMP)`
+    `INSERT INTO appointments(phone_number, patient_name, doctor_name, department, appointment_date, appointment_time, token_number, status, created_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, 'confirmed', CURRENT_TIMESTAMP)`
   ).bind(phone, name, action.doctor_name, action.department || "General", date, time, token).run();
 
-  await notifyStaff(env, `📅 बुकिंग: ${action.doctor_name} | ${name} | ${time} | Token: ${token}`);
+  await notifyStaff(env, `📅 बुकिंग: ${action.doctor_name} | ${name} | ${time} | Token: ${token} `);
 }
 
 async function bookLabTest(env, phone, name, action) {
@@ -318,34 +307,34 @@ async function bookLabTest(env, phone, name, action) {
   const time = action.time || "09:00 AM";
 
   await env.DB.prepare(
-    `INSERT INTO lab_tests (phone_number, patient_name, test_name, test_date, test_time, status, created_at) 
-         VALUES (?, ?, ?, ?, ?, 'booked', CURRENT_TIMESTAMP)`
+    `INSERT INTO lab_tests(phone_number, patient_name, test_name, test_date, test_time, status, created_at)
+VALUES(?, ?, ?, ?, ?, 'booked', CURRENT_TIMESTAMP)`
   ).bind(phone, name, action.test_name, date, time).run();
 
-  await notifyStaff(env, `🧪 टेस्ट: ${action.test_name} | ${name}`);
+  await notifyStaff(env, `🧪 टेस्ट: ${action.test_name} | ${name} `);
 }
 
 async function setMedicineReminder(env, phone, name, action) {
   await env.DB.prepare(
-    `INSERT INTO medicine_reminders (phone_number, patient_name, medicine_name, reminder_time, active, created_at) 
-         VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+    `INSERT INTO medicine_reminders(phone_number, patient_name, medicine_name, reminder_time, active, created_at)
+VALUES(?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
          ON CONFLICT(phone_number, medicine_name) DO UPDATE SET reminder_time = ?, active = 1`
   ).bind(phone, name, action.medicine_name, action.reminder_time, action.reminder_time).run();
 }
 
 async function requestPrescriptionRefill(env, phone, name, action) {
   await env.DB.prepare(
-    `INSERT INTO prescription_requests (phone_number, patient_name, medicine_name, status, created_at) 
-         VALUES (?, ?, ?, 'pending', CURRENT_TIMESTAMP)`
+    `INSERT INTO prescription_requests(phone_number, patient_name, medicine_name, status, created_at)
+VALUES(?, ?, ?, 'pending', CURRENT_TIMESTAMP)`
   ).bind(phone, name, action.medicine_name).run();
 
-  await notifyStaff(env, `💊 Refill: ${action.medicine_name} | ${name}`);
+  await notifyStaff(env, `💊 Refill: ${action.medicine_name} | ${name} `);
 }
 
 async function collectFeedback(env, phone, name, action) {
   await env.DB.prepare(
-    `INSERT INTO feedback (phone_number, patient_name, rating, feedback_text, created_at) 
-         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`
+    `INSERT INTO feedback(phone_number, patient_name, rating, feedback_text, created_at)
+VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP)`
   ).bind(phone, name, action.rating, action.feedback_text || "").run();
 }
 
@@ -376,9 +365,9 @@ async function getPatientHistory(db, phone) {
 }
 
 async function handleEmergency(env, from, name, text, session) {
-  const alert = `🚨 *आपातकालीन सूचना* 🚨\n\nनमस्ते ${name},\n\nतुरंत अस्पताल आएं या फोन करें:\n*${env.HOSPITAL_PHONE}*\n\n📍 बैदौला चौराहा, बंसी रोड, डुमरियागंज\n\nडॉक्टर को सूचित कर दिया गया है।`;
+  const alert = `🚨 * आपातकालीन सूचना * 🚨\n\nनमस्ते ${name}, \n\nतुरंत अस्पताल आएं या फोन करें: \n * ${env.HOSPITAL_PHONE}*\n\n📍 बैदौला चौराहा, बंसी रोड, डुमरियागंज\n\nडॉक्टर को सूचित कर दिया गया है।`;
   await sendMessage(env, from, alert);
-  await notifyStaff(env, `🚨 EMERGENCY: ${name} (${from}) - ${text}`);
+  await notifyStaff(env, `🚨 EMERGENCY: ${name} (${from}) - ${text} `);
 }
 
 function isEmergency(text) {
