@@ -1,18 +1,15 @@
 /**
- * RPL HOSPITAL - AI AUTOMATION v10.0 (CONTEXT-AWARE)
- * ==================================================
- * Powered by Groq (Llama-3) for Natural Conversations.
- * Managed Flow: Intent -> Context -> Action -> Response.
+ * RPL HOSPITAL - PROFESSIONAL AI v11.0 (PROTOPROCESSOR)
+ * ======================================================
+ * Professional protocol-driven AI for high-end hospital automation.
  */
 
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "GET") {
       const url = new URL(request.url);
-      if (url.pathname === "/webhook") {
-        return new Response(url.searchParams.get("hub.challenge"), { status: 200 });
-      }
-      return new Response("AI Bot Active", { status: 200 });
+      if (url.pathname === "/webhook") return new Response(url.searchParams.get("hub.challenge"), { status: 200 });
+      return new Response("Hospital AI Active", { status: 200 });
     }
 
     if (request.method === "POST") {
@@ -33,13 +30,14 @@ export default {
   }
 };
 
-const DOCTORS_INFO = `
-Available Doctors at RPL Hospital:
-1. Dr. Akhilesh Kumar (Specialist: Sugar/Diabetes & General Physician). Timing: daily 2 PM to 7 PM. 
-2. Dr. Ankit Shukla (Specialist: Neurology/Brain/Nerves). Availability: Only on 15th of every month, 2-7 PM.
-3. Dr. A.K. Singh (Specialist: ENT - Ear, Nose, Throat). Availability: Mondays only, 3-6 PM.
-4. Dr. Anand Mishra (Specialist: Dentist/Teeth). Timing: daily 3-6 PM.
-Address: Baidaula Chauraha, Bansi Road, Dumariyaganj.
+const HOSPITAL_DOCS = `
+*RPL Hospital Doctors & Specialization:*
+1. *Dr. Akhilesh Kumar Kasaudhan* - General Physician & Diabetes Specialist. (Daily: 02:00 PM - 07:00 PM)
+2. *Dr. Ankit Shukla* - Senior Neurologist (Brain & Nerves). (Only 15th of every Month: 02:00 PM - 07:00 PM)
+3. *Dr. A.K. Singh* - ENT Specialist (Ear, Nose, Throat). (Mondays Only: 03:00 PM - 06:00 PM)
+4. *Dr. Anand Mishra* - Dental Surgeon. (Daily: 03:00 PM - 06:00 PM)
+
+*Location:* Baidaula Chauraha, Bansi Road, Dumariyaganj, Siddharthnagar.
 `;
 
 async function handleAIChat(message, contact, env) {
@@ -47,51 +45,49 @@ async function handleAIChat(message, contact, env) {
   const name = contact?.profile?.name || "Patient";
   const userText = message.text.body;
 
-  // 1. Get Conversation History from KV
-  const historyKey = `hist_${phone}`;
-  let historyRows = await env.SESSIONS.get(historyKey);
-  let history = historyRows ? JSON.parse(historyRows) : [];
+  // Get History & Logic State
+  const historyKey = `hist_v11_${phone}`;
+  let history = JSON.parse(await env.SESSIONS.get(historyKey) || "[]");
+  if (history.length > 8) history = history.slice(-8);
 
-  // Keep history lean (last 6 messages)
-  if (history.length > 6) history = history.slice(-6);
-
-  // 2. Prepare AI Prompt
-  const systemPrompt = `
-    You are the AI Front-Desk Manager of RPL Hospital. 
-    Strict Rule: Talk in a helpful, professional, and friendly manner using a mix of Hindi and English (Hinglish).
+  // AI SYSTEM PROTOCOL
+  const seniorProtocol = `
+    You are the 'Senior Patient Coordinator' at RPL Hospital. 
+    Your goal is to guide the patient through a standard professional hospital protocol.
     
-    Current Patient: ${name}
-    Hospital Info: ${DOCTORS_INFO}
-    Todays Date: ${new Date().toLocaleDateString()}
+    *PROTOCOL STEPS:*
+    1. GREETING: Welcome gracefully and ask about their health concern.
+    2. TRIAGE: Understand their problem and suggest the *Best Doctor* from our list.
+    3. PRE-BOOKING: Ask for their preferred Date (Aaj/Kal/Date) and Time.
+    4. CONFIRMATION SUMMARY: Present a clear summary of all details and ask for "Yes/No" to book.
+    5. FINALIZATION: Generate token ONLY after they say "Yes" or equivalent.
 
-    Your Goal:
-    - Greet if it's a new conversation.
-    - If user wants appointment, ask their problem, then suggest the right doctor.
-    - Collect appointment details: Problem, Doctor Name, Date, and Time Preference.
-    - Suggest slots: 10AM, 11AM, 2PM, 3PM, 4PM.
-    - When all details are clear, tell them you are booking it.
-    - Handle emergencies by telling them to come immediately or call ${env.HOSPITAL_PHONE}.
+    *TONE & MANNER:*
+    - Professional, formal, and polite.
+    - Use "Aap" instead of "Tum".
+    - Use clear headings and bold text for important info.
+    - Mix of formal Hindi and English (High-end Hinglish).
 
-    Output Format (JSON strictly):
+    *HOSPITAL DATA:*
+    ${HOSPITAL_DOCS}
+    Todays Date: ${new Date().toLocaleDateString('hi-IN')}
+
+    *JSON OUTPUT FORMAT REQUIRED:*
     {
-      "reply": "Your message to the patient in Hinglish",
-      "action": "none" or "finalize_booking",
+      "reply": "Professional message in markdown",
+      "action": "none" | "finalize_booking",
       "data": { "doctor": "name", "date": "date", "time": "time", "problem": "issue" }
     }
     `;
 
-  // 3. Call Groq AI
   try {
-    const aiResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "Authorization": `Bearer ${env.GROQ_API_KEY}`,
-        "Content-Type": "application/json"
-      },
+      headers: { "Authorization": `Bearer ${env.GROQ_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "llama-3.1-8b-instant",
         messages: [
-          { role: "system", content: systemPrompt },
+          { role: "system", content: seniorProtocol },
           ...history,
           { role: "user", content: userText }
         ],
@@ -99,36 +95,42 @@ async function handleAIChat(message, contact, env) {
       })
     });
 
-    const aiData = await aiResponse.json();
-    const botResponse = JSON.parse(aiData.choices[0].message.content);
+    const aiData = await response.json();
+    const output = JSON.parse(aiData.choices[0].message.content);
 
-    // 4. Execute Action if finalized
-    if (botResponse.action === "finalize_booking") {
+    // ACTION: Finalize Appointment
+    if (output.action === "finalize_booking") {
       const token = Math.floor(1000 + Math.random() * 9000);
-      const { doctor, date, time } = botResponse.data;
+      const { doctor, date, time, problem } = output.data;
 
       await env.DB.prepare(
         "INSERT INTO appointments (phone_number, patient_name, doctor_name, appointment_date, appointment_time, token_number, status) VALUES (?, ?, ?, ?, ?, ?, ?)"
       ).bind(phone, name, doctor, date, time, token, 'confirmed').run();
 
-      botResponse.reply += `\n\n✅ *Confirmed!*\n🎫 Token: ${token}\n📍 Place: RPL Hospital`;
+      output.reply = `✨ *Appointment Confirmed!* ✨\n\n` +
+        `👤 *Patient:* ${name}\n` +
+        `👨‍⚕️ *Doctor:* ${doctor}\n` +
+        `📅 *Date:* ${date}\n` +
+        `⏰ *Time:* ${time}\n` +
+        `🎫 *Token No:* ${token}\n\n` +
+        `📍 *Location:* Baidaula Chauraha, Bansi Road, Dumariyaganj.\n\n` +
+        `Please reach 15 minutes before your time. Thank you! 🙏`;
 
-      // Notify Hospital
+      // Staff Notification
       if (env.HOSPITAL_NOTIFICATION_NUMBER) {
-        await sendWhatsApp(env, env.HOSPITAL_NOTIFICATION_NUMBER, `New AI Booking:\n${name} (${phone})\nDoc: ${doctor}\nTime: ${date} ${time}`);
+        await sendWhatsApp(env, env.HOSPITAL_NOTIFICATION_NUMBER, `🏥 *New Patient Booking*\n\nName: ${name}\nPhone: ${phone}\nDoc: ${doctor}\nProblem: ${problem}\nTime: ${date} ${time}`);
       }
     }
 
-    // 5. Send Response back to User
-    await sendWhatsApp(env, phone, botResponse.reply);
+    await sendWhatsApp(env, phone, output.reply);
 
-    // 6. Update History
+    // Update Context
     history.push({ role: "user", content: userText });
-    history.push({ role: "assistant", content: botResponse.reply });
+    history.push({ role: "assistant", content: output.reply });
     await env.SESSIONS.put(historyKey, JSON.stringify(history), { expirationTtl: 3600 });
 
   } catch (err) {
-    console.error("AI Error:", err);
+    console.error(err);
     await sendWhatsApp(env, phone, "माफ़ करें, मैं अभी आपकी बात पूरी तरह समझ नहीं पा रहा हूँ। क्या आप दोबारा बताएंगे?");
   }
 }
