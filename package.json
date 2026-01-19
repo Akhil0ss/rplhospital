@@ -1,11 +1,13 @@
 {
     "name": "rplhospital",
-    "version": "4.1.0",
-    "description": "RPL Hospital WhatsApp AI Receptionist",
+    "version": "8.0.0",
+    "description": "RPL Hospital WhatsApp AI Receptionist - Modular Architecture",
     "main": "src/index.js",
     "scripts": {
         "deploy": "wrangler deploy",
-        "dev": "wrangler dev"
+        "dev": "wrangler dev",
+        "db:migrate": "wrangler d1 execute rpl_hospital_db --remote --file=./schema.sql",
+        "db:migrate:local": "wrangler d1 execute rpl_hospital_db --local --file=./schema.sql"
     },
     "dependencies": {},
     "devDependencies": {
