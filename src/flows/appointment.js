@@ -82,7 +82,12 @@ export class AppointmentFlow {
             specialty: doc.specialty
         }));
 
-        const suggestion = await this.services.ai.suggestDoctor(problem, doctorsList);
+        let suggestion = { confidence: 0 };
+        try {
+            suggestion = await this.services.ai.suggestDoctor(problem, doctorsList);
+        } catch (e) {
+            console.error("AI Doctor Suggestion Failed, falling back to keywords");
+        }
 
         const docList = `\n\n📋 *हमारे डॉक्टर्स:*\n` +
             `1. डॉ. अखिलेश - शुगर व सामान्य रोग\n` +
@@ -95,6 +100,11 @@ export class AppointmentFlow {
         if (suggestion.confidence > 0.6) {
             const suggestedDoc = DOCTORS[suggestion.suggested_doctor];
             reply += `\n\n💡 ${suggestedDoc.name} से मिलना बेहतर रहेगा।\n${suggestion.reason}`;
+        } else {
+            // Manual keyword fallback if AI confidence is low or failed
+            const lower = problem.toLowerCase();
+            if (lower.includes('sugar') || lower.includes('शुगर')) reply += `\n\n💡 डॉ. अखिलेश (शुगर विशेषज्ञ) से मिलना बेहतर रहेगा।`;
+            else if (lower.includes('दिमाग') || lower.includes('sir')) reply += `\n\n💡 डॉ. अंकित (दिमाग विशेषज्ञ) से मिलना बेहतर रहेगा।`;
         }
 
         reply += `${docList}\n\nकिस डॉक्टर से मिलना चाहेंगे? (1-4 लिखें)`;

@@ -36,17 +36,26 @@ export class MessageProcessor {
      */
     async processMessage(phone, name, message, messageId) {
         try {
-            // Mark message as read
-            await this.services.whatsapp.markAsRead(messageId);
+            // Mark message as read (Non-critical, don't crash if fails)
+            try { await this.services.whatsapp.markAsRead(messageId); } catch (e) { }
 
-            // Log incoming message
-            await this.logMessage(phone, 'incoming', message, messageId);
+            // Log incoming message (Non-critical)
+            try { await this.logMessage(phone, 'incoming', message, messageId); } catch (e) { }
 
             // Get current session state
-            const state = await this.services.session.getState(phone);
+            let state;
+            try {
+                state = await this.services.session.getState(phone);
+            } catch (e) {
+                state = { step: 'start', flow: 'main-menu' };
+            }
 
-            // Ensure patient exists
-            await this.services.patient.getOrCreatePatient(phone, name);
+            // Ensure patient exists (Important)
+            try {
+                await this.services.patient.getOrCreatePatient(phone, name);
+            } catch (e) {
+                console.error("Patient DB Error:", e);
+            }
 
             // Check for emergency first
             if (this.isEmergency(message)) {
@@ -58,12 +67,22 @@ export class MessageProcessor {
             }
 
             // Route to appropriate flow
-            const currentFlow = state.flow || 'main-menu';
+            let currentFlow = state.flow || 'main-menu';
+
+            // Safety: if user wants to reset
+            if (message.toLowerCase().match(/^(menu|मेनू|stop|hi|hello|नमस्ते|शुरू|start)$/)) {
+                currentFlow = 'main-menu';
+                state = { step: 'start', flow: 'main-menu' };
+            }
+
             const flowHandler = this.flows[currentFlow];
 
             if (!flowHandler) {
                 console.error(`Unknown flow: ${currentFlow}`);
-                await this.sendFallbackResponse(phone);
+                await this.sendResponse(phone, {
+                    reply: "नमस्ते! कृपया 'मेनू' लिखकर शुरुआत करें।",
+                    newState: { step: 'start', flow: 'main-menu', name }
+                });
                 return;
             }
 
@@ -80,11 +99,11 @@ export class MessageProcessor {
 
             // Handle notifications
             if (result.notify) {
-                await this.services.notification.notifyStaff(result.notify);
+                try { await this.services.notification.notifyStaff(result.notify); } catch (e) { }
             }
 
         } catch (error) {
-            console.error(`Message Processing Error for ${phone}:`, error);
+            console.error(`Critical Message Processing Error for ${phone}:`, error);
             await this.sendErrorResponse(phone);
         }
     }
